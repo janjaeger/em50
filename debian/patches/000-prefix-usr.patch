@@ -1,0 +1,11 @@
+--- em50-0.0.orig/makefile.orig	2020-02-08 15:53:41.000000000 +0100
++++ em50-0.0/makefile	2020-02-08 15:59:03.682190759 +0100
+@@ -2,7 +2,7 @@
+ 
+ bin := em50
+ 
+-prefix := /usr/local
++prefix := /usr
+ 
+ CFLAGS := -O3 -Wall -std=gnu11
+ LDFLAGS := -lreadline -lpthread -lm -ltelnet

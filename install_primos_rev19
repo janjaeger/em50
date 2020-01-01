@@ -1,0 +1,109 @@
+#!/usr/bin/expect -f
+
+system curl -O http://bitsavers.informatik.uni-stuttgart.de/bits/Prime/pps/03_log.tape_I=boot_II=iptpal.tap.gz
+system gunzip -f 03_log.tape_I=boot_II=iptpal.tap.gz
+
+set timeout -1
+
+spawn em50
+expect "CP> ";                         send -- "ASSIGN MT0 03_log.tape_I=boot_II=iptpal.tap\r"
+
+expect "CP> ";                         send -- "BOOT 15\r"
+expect "TREENAME=";                    send -- "*DOS64\r"
+expect "OK: ";                         send -- "\033\033"
+expect "CP> ";                         send -- "STOP\r"
+expect "CP> ";                         send -- "SYSCLR\r"
+expect "CP> ";                         send -- "BOOT 505\r"
+expect "TREENAME=";                    send -- "MAKE\r"
+expect "CP> ";                         send -- "RUN 170000\r"
+expect "OK: ";                         send -- "S 1000 -DSK 2460 -PRE19 -DT -SPLIT -BADLEV 0 -FMT -NEWDSK\r"
+expect "Partition name? ";             send -- "ZZ2460\r"
+expect "Disk type? ";                  send -- "160MB\r"
+expect "Decimal records for paging? "; send -- "10000\r"
+expect "OK: ";                         send -- "STARTUP 2460\r"
+expect "OK: ";                         send -- "A MFD XXXXXX\r"
+expect "OK: ";                         send -- "\033\033"
+expect "CP> ";                         send -- "STOP\r"
+expect "CP> ";                         send -- "SYSCLR\r"
+expect "CP> ";                         send -- "BOOT 505\r"
+expect "TREENAME=";                    send -- "MAGRST\r"
+expect "CP> ";                         send -- "RUN 170000\r"
+expect "OK: ";                         send -- "S 1000\r"
+expect "Tape unit (9 Trk): ";          send -- "0\r"
+expect "Enter logical tape number: ";  send -- "2\r"
+expect "Ready to Restore: ";           send -- "YES\r"
+
+expect "OK: ";                         send -- "A CMDNC0\r"
+
+expect "OK: ";                         send -- "CN PRIMOS PRIMOS.ORIG\r"
+expect "OK: ";                         send -- "CN PRIMOS.1940 PRIMOS\r"
+
+expect "OK: ";                         send -- "CN CONFIG CONFIG.ORIG\r"
+
+expect "OK: ";                         send -- "NSED\r"
+expect "INPUT\r"; sleep 1
+  send -- "TYPOUT    YES\r"
+  send -- "COMDEV   2460\r"
+  send -- "PAGDEV   2460\r"
+  send -- "MAXPAG  20000\r"
+  send -- "ASRBUF      0    200    400\r"
+  send -- "ASRATE   3410\r"
+  send -- "ABBREV    YES\r"
+  send -- "ERASE     377\r"
+  send -- "KILL      277\r"
+  send -- "NTUSR     101\r"
+  send -- "NPUSR      10\r"
+  send -- "NSEG    16000\r"
+  send -- "NAMLC      40\r"
+  send -- "AMLCLK  22600\r"
+  send -- "AMLTIM     24   3410   3410\r"
+  send -- "DTRDRP\r"
+  send -- "DISLOG    YES\r"
+  send -- "AMLIBL      0\r"
+  send -- "WIRMEM\r"
+  send -- "GO\r\r"
+expect "EDIT\r"; sleep 1;              send -- "FILE CONFIG\r"
+
+expect "OK: ";                         send -- "CN C_PRMO C_PRMO.ORIG\r"
+
+expect "OK: ";                         send -- "NSED\r"
+expect "INPUT\r"; sleep 1
+  send -- "CONFIG -DATA CONFIG\r"
+  send -- "AMLC TTY 0 2413 020002\r"
+  send -- "AMLC TTY 1 2413 020003\r"
+  send -- "AMLC TTY 2 2413 020004\r"
+  send -- "AMLC TTY 3 2413 020005\r"
+  send -- "AMLC TTY 4 2413 020006\r"
+  send -- "AMLC TTY 5 2413 020007\r"
+  send -- "AMLC TTY 6 2413 020010\r"
+  send -- "AMLC TTY 7 2413 020011\r"
+  send -- "AMLC TTY 10 2413 020012\r"
+  send -- "AMLC TTY 11 2413 020013\r"
+  send -- "AMLC TTY 12 2413 020014\r"
+  send -- "AMLC TTY 13 2413 020015\r"
+  send -- "AMLC TTY 14 2413 020016\r"
+  send -- "AMLC TTY 15 2413 020017\r"
+  send -- "AMLC TTY 16 2413 020020\r"
+  send -- "OPR 1\r"
+  send -- "SHARE SYSTEM>ED2000 2000\r"
+  send -- "SHARE SYSTEM>F2021A 2021 700\r"
+  send -- "SHARE SYSTEM>F2021B 2021 700\r"
+  send -- "R SYSTEM>F4000 1/4\r"
+  send -- "SHARE 2021\r"
+  send -- "OPR 0\r"
+  send -- "CO SYSTEM>COBOL.SHARE.COMI 7\r"
+  send -- "CO SYSTEM>CBL.SHARE.COMI 7\r"
+  send -- "MAX ALL\r"
+  send -- "CO -END\r\r"
+expect "EDIT\r"; sleep 1;              send -- "FILE C_PRMO\r"
+
+expect "OK: ";                         send -- "A PRIRUN\r"
+expect "OK: ";                         send -- "R PRIMOS\r"
+
+expect "CO -END"
+
+expect "OK, ";                         send -- "SH ALL\r"
+expect "REALLY? ";                     send -- "YES\r"
+expect "CP> ";                         send -- "QUIT\r"
+
+expect eof

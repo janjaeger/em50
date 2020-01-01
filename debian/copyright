@@ -1,0 +1,5 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: em50
+Source: https://github.com/janjaeger/em50
+Copyright: Copyright (C) 1999-2019 Jan Jaeger, All Rights Reserved.
+License:   GPL v3

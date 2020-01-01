@@ -1,0 +1,13 @@
+Source: em50
+Section: unknown
+Priority: optional
+Maintainer: Jan Jäger <jan.jaeger@gmail.com>
+Build-Depends: debhelper (>=10~), libreadline-dev (>=6~), libtelnet-dev (>=0~)
+Standards-Version: 4.1.4
+Homepage: <insert the upstream URL, if relevant>
+
+Package: em50
+Architecture: any
+Multi-Arch: foreign
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Description: Prime Series 50 Emulator

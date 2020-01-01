@@ -1,0 +1,104 @@
+EM50 - Prime Series 50 Emulator
+
+
+Two libraries are needed:
+libtelnet:  https://github.com/seanmiddleditch/libtelnet.git
+libreadline: https://git.savannah.gnu.org/git/readline.git
+
+
+Documentation and tape media:
+From: http://bitsavers.org
+
+
+Primos installation script install_primos requires: expect, wget and unzip
+
+
+Known issues:
+- AMLC DMQ I/O is currently not interlocked
+- FLOAT instructions are IEEE based, and may round differently
+- DECIMAL instructions not yet complete / correct
+
+
+Todo:
+- MP support 
+- AMLC connect 
+- RJE support in combination with hercules http://hercules-390.org
+
+
+Valid options are:
+  -c --config  <.em50/rc>
+  -p --path    <.em50>
+  -b --bind    <0.0.0.0>
+  -l --port    <2323>
+  -s --storage <size>
+  -h --help
+
+
+ENTER EMULATOR CP PROMPT
+<ESC><ESC>
+
+ENTER RING ZERO DEBUGGER (WHEN LOADED)
+<^C>\
+
+SEND BREAK 
+<^P>
+
+
+BOOT SWITCHES (SSS, OCTAL)
+
+SSSDDD
+
+100DDD DO NOT EXECUTE PRIMOS.COMI
+040DDD LOAD RING 0 DEBUGGER
+020DDD ENTER DEBUGGER AFTER LOADING PRIMOS
+010DDD DO NOT PROMPT FOR DEVICE
+004DDD DO NOT PROMPT FOR FILE NAME
+002DDD HALT BEFORE EXECUTING PRIMOS
+001DDD DO NOT HALT ON MACHINE CHECK
+
+BOOT DEVICE (DDD, OCTAL)
+
+SSS005 ADDRESS 014/0 MT0
+SSS205 ADDRESS 014/1 MT2
+SSS405 ADDRESS 014/2 MT3
+SSS605 ADDRESS 014/3 MT3
+SSS025 ADDRESS 013/0 MT4
+SSS225 ADDRESS 013/1 MT5
+SSS425 ADDRESS 013/2 MT6
+SSS625 ADDRESS 013/3 MT7
+
+SSS114 ADDRESS 026/0
+SSS314 ADDRESS 026/1
+SSS514 ADDRESS 026/2
+SSS714 ADDRESS 026/3
+SSS134 ADDRESS 027/0
+SSS334 ADDRESS 027/1
+SSS534 ADDRESS 027/2
+SSS734 ADDRESS 027/3
+SSS154 ADDRESS 022/0
+SSS354 ADDRESS 022/1
+SSS554 ADDRESS 022/2
+SSS754 ADDRESS 022/3
+SSS174 ADDRESS 023/0
+SSS374 ADDRESS 023/1
+SSS574 ADDRESS 023/2
+SSS774 ADDRESS 023/3
+
+DDDDDD (DATA SWITCHES IN OCTAL - CPBOOT)
+040000 FORCES THE SYSTEM TO HALT AFTER AN ERROR
+020000 INHIBITS PIO TIMEOUTS
+010000 BYPASSES DIAGNOSTIC ROUTINES
+004000 FORCES ERROR DISPLAY
+002000 DISPLAYS INFORMATIONAL MESSAGES
+000002 BOOTS FROM A PRE REV 20 TAPE
+000001 IO BUS TESTER
+
+
+Sample rc file
+
+$ cat .em50/rc
+assign mt0 .em50/primos_22.1.4_1of3.tap
+assign mt1 .em50/primos_22.1.4_2of3.tap
+assign mt2 .em50/primos_22.1.4_3of3.tap
+boot 14114
+$
