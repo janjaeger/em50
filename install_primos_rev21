@@ -1,0 +1,168 @@
+#!/usr/bin/expect -f
+
+system curl -O https://sysovl.info/pages/blobs/prime/prime/primos_21.0.tar.gz
+system tar -xzf primos_21.0.tar.gz
+system rm -f .em50/dk0260
+
+set timeout -1
+
+spawn em50
+expect "CP> ";                         send -- "ASSIGN MT0 m210bt.tap\r"
+
+expect "CP> ";                         send -- "BOOT 10005\r"
+expect "RUN FILE TREENAME=";           send -- "MAKE.SAVE\r"
+expect "Enter command line options: "; send -- "-DISK 3461 -FMT -NEWDSK -BADLEV 0 -NOFLMP -SPLIT\r"
+expect "Partition name? ";             send -- "SYS210\r"
+expect "Disk type? ";                  send -- "MODEL_4860\r"
+expect "Decimal records for paging? "; send -- "40000\r"
+expect "> ";                           send -- "1\r"
+expect "CP> ";                         send -- "SYSCLR\r"
+
+expect "CP> ";                         send -- "ASSIGN MT1 m210u1.tap\r"
+expect "CP> ";                         send -- "ASSIGN MT2 m210c1.tap\r"
+expect "CP> ";                         send -- "ASSIGN MT3 m210v1.tap\r"
+expect "CP> ";                         send -- "ASSIGN MT4 m210ic.tap\r"
+
+expect "CP> ";                         send -- "BOOT 14045\r"
+expect "CP> ";                         send -- "ALTER R 01004 03410 03735 034006\r"
+expect "CP> ";                         send -- "RUN\r"
+
+expect "Enter COMmand DEVice: ";       send -- "3461\r"
+expect "Enter PAGing DEVice: ";        send -- "3461\r"
+expect "Enter Number Terminal USeRs: ";send -- "1\r"
+expect "Enter system name:  ";         send -- "EM50\r"
+
+sleep 4;                               send -- "TYPE ZZZ\r"; expect "ZZZ"
+
+expect "OK, ";                         send -- "AS MT0\r"
+expect "OK, ";                         send -- "AS MT1\r"
+expect "OK, ";                         send -- "AS MT2\r"
+expect "OK, ";                         send -- "AS MT3\r"
+expect "OK, ";                         send -- "AS MT4\r"
+
+expect "OK, ";                         send -- "A MFD\r"
+
+expect "OK, ";                         send -- "MTRESUME MT0 MAGRST\r"
+expect "Tape unit (9 Trk): ";          send -- "1\r"
+expect "Enter logical tape number: ";  send -- "1\r"
+expect "Ready to Restore: ";           send -- "YES\r"
+
+expect "OK, ";                         send -- "START\r"
+expect "Tape unit (9 Trk): ";          send -- "2\r"
+expect "Enter logical tape number: ";  send -- "1\r"
+expect "Ready to Restore: ";           send -- "YES\r"
+
+expect "OK, ";                         send -- "START\r"
+expect "Tape unit (9 Trk): ";          send -- "3\r"
+expect "Enter logical tape number: ";  send -- "1\r"
+expect "Ready to Restore: ";           send -- "YES\r"
+
+expect "OK, ";                         send -- "START\r"
+expect "Tape unit (9 Trk): ";          send -- "4\r"
+expect "Enter logical tape number: ";  send -- "1\r"
+expect "Ready to Restore: ";           send -- "YES\r"
+
+expect "OK, ";                         send -- "A CMDNC0\r"
+expect "OK, ";                         send -- "NSED\r"
+expect "INPUT\r"; sleep 1
+  send -- "TYPOUT    YES\r"
+  send -- "COMDEV   3461\r"
+  send -- "PAGING   3461\r"
+  send -- "SYSNAM   EM50\r"
+  send -- "ASRBUF      0    200    400\r"
+  send -- "ASRATE   3410\r"
+  send -- "ABBREV    YES\r"
+  send -- "ERASE     377\r"
+  send -- "KILL      277\r"
+  send -- "NTUSR     101\r"
+  send -- "NPUSR      10\r"
+  send -- "NSEG    16000\r"
+  send -- "NLBUF    1000\r"
+  send -- "NAMLC      40\r"
+  send -- "AMLCLK  22600\r"
+  send -- "AMLTIM     24   3410   3410\r"
+  send -- "ASYNC  JUMPER   4540  11300  45400\r"
+  send -- "DTRDRP\r"
+  send -- "DISLOG    YES\r"
+  send -- "AMLIBL      0\r"
+  send -- "WIRMEM\r"
+  send -- "GO\r\r"
+expect "EDIT\r"; sleep 1;              send -- "FILE CONFIG\r"
+
+expect "OK, ";                         send -- "NSED\r"
+expect "INPUT\r"; sleep 1
+  send -- "CONFIG -DATA CONFIG\r"
+  send -- "OPR 1\r"
+  send -- "SHARE SYSTEM>ED2000 2000\r"
+  send -- "SHARE SYSTEM>F2021A 2021 700\r"
+  send -- "SHARE SYSTEM>F2021B 2021 700\r"
+  send -- "R SYSTEM>F4000 1/4\r"
+  send -- "SHARE 2021\r"
+  send -- "OPR 0\r"
+# send -- "START_DSM\r"
+# send -- "START_TALK_SERVER\r"
+  send -- "MAX ALL\r"
+  send -- "CO -END\r\r"
+expect "EDIT\r"; sleep 1;              send -- "FILE PRIMOS.COMI\r"
+
+expect "OK, ";                         send -- "SH ALL\r"
+expect "REALLY? ";                     send -- "YES\r"
+expect "CP> ";                         send -- "QUIT\r"
+expect eof
+# expect "CP> ";                         send -- "SYSCLR\r"
+
+spawn em50
+expect "CP> ";                         send -- "BOOT 14114\r"
+
+expect "CO -END";
+expect "OK, ";                         send -- "A SYSTEM\r"
+
+expect "OK, ";                         send -- "R ENTRY$.INSTALL.CPL\r"
+expect "OK, ";                         send -- "SSR SEARCH_RULES*>ENTRY$.SR\r"
+expect "OK, ";                         send -- "R ATTACH$.INSTALL.CPL\r"
+expect "OK, ";                         send -- "R BINARY$.INSTALL.CPL\r"
+expect "OK, ";                         send -- "R COMMAND$.INSTALL.CPL\r"
+expect "OK, ";                         send -- "R INCLUDE$.INSTALL.CPL\r"
+
+expect "OK, ";                         send -- "A TRANSLATORS\r"
+expect "OK, ";                         send -- "R TRANSLATORS.INSTALL.CPL\r"
+
+expect "OK, ";                         send -- "A SYSTEM\r"
+
+expect "OK, ";                         send -- "CO FTN>FTN.INSTALL.COMI\r"
+
+expect "OK, ";                         send -- "CO BASIC>BASIC.INSTALL.COMI\r"
+
+expect "OK, ";                         send -- "EDIT_PROFILE\r"
+expect "Create it? ";                  send -- "YES\r"
+expect "Projected number of users: ";  send -- "100\r"
+expect "System administrator name: ";  send -- "SYSTEM\r"
+expect "Create project \"DEFAULT\"? "; send -- "YES\r"
+expect "Password: ";                   send -- "SYSTEM\r"
+expect "Groups: ";                     send -- "\r"
+expect "Groups: ";                     send -- "\r"
+expect "number of command levels: ";   send -- "16\r"
+expect "invocations per command level: "; send -- "16\r"
+expect "dynamic segments: ";           send -- "128\r"
+expect "static segments: ";            send -- "128\r"
+expect "Groups: ";                     send -- "\r"
+expect "Initial attach point: ";       send -- "<SYS210>SYSTEM\r"
+expect "Create/change user attributes? "; send -- "NO\r"
+expect "Groups: ";                     send -- "\r"
+expect "Initial attach point: ";       send -- "\r"
+expect "Number of command levels: ";   send -- "\r"
+expect "invocations per command level: "; send -- "\r"
+expect "dynamic segments: ";           send -- "\r"
+expect "static segments: ";            send -- "\r"
+expect "Check entry? ";                send -- "NO\r"
+expect "> ";                           send -- "SD -ON\r"
+expect "> ";                           send -- "QUIT\r"
+
+#expect "OK, ";                         send -- "R DSM.INSTALL_ACL.CPL\r"
+#expect "OK, ";                         send -- "R TALK.INSTALL_ACL.CPL\r"
+
+expect "OK, ";                         send -- "SH ALL\r"
+expect "REALLY? ";                     send -- "YES\r"
+expect "CP> ";                         send -- "QUIT\r"
+
+expect eof

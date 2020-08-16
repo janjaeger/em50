@@ -2,6 +2,7 @@
 
 system curl -O http://bitsavers.informatik.uni-stuttgart.de/bits/Prime/pps/03_log.tape_I=boot_II=iptpal.tap.gz
 system gunzip -f 03_log.tape_I=boot_II=iptpal.tap.gz
+system rm -f .em50/dk0260
 
 set timeout -1
 
@@ -17,7 +18,7 @@ expect "CP> ";                         send -- "BOOT 505\r"
 expect "TREENAME=";                    send -- "MAKE\r"
 expect "CP> ";                         send -- "RUN 170000\r"
 expect "OK: ";                         send -- "S 1000 -DSK 2460 -PRE19 -DT -SPLIT -BADLEV 0 -FMT -NEWDSK\r"
-expect "Partition name? ";             send -- "ZZ2460\r"
+expect "Partition name? ";             send -- "SYS194\r"
 expect "Disk type? ";                  send -- "160MB\r"
 expect "Decimal records for paging? "; send -- "10000\r"
 expect "OK: ";                         send -- "STARTUP 2460\r"

@@ -1,71 +1,81 @@
 #!/usr/bin/expect -f
 
-system "wget http://bitsavers.org/bits/Prime/primos_22.1.4.zip"
-system "unzip primos_22.1.4.zip"
+# We need to boot from another tape, because the boot record is of 23.4 is truncated
+system curl -O https://sysovl.info/pages/blobs/prime/prime/primos_24.0.tar.gz
+system tar -xzvf primos_24.0.tar.gz
+system curl -O https://sysovl.info/pages/blobs/prime/prime/primos_23.4.tar.gz
+system tar -xzvf primos_23.4.tar.gz
+system rm -f .em50/dk0260
 
 set timeout -1
 
 spawn em50
-expect "CP> ";                         send -- "ASSIGN MT0 primos_22.1.4/primos_22.1.4_1of3.tap\r"
+expect "CP> ";                         send -- "ASSIGN MT7 m240bt.tap\r"
+expect "CP> ";                         send -- "ASSIGN MT0 m234bt.tap\r"
 
-expect "CP> ";                         send -- "BOOT 10005\r"
+expect "CP> ";                         send -- "BOOT 00625\r"
+
+expect "PHYSICAL DEVICE=";             send -- "MT0\r"
+
 expect "RUN FILE TREENAME=";           send -- "MAKE.SAVE\r"
-expect "Enter command line options: "; send -- "-DISK 3461 -FMT -NEWDSK -BADLEV 0 -NOFLMP -SPLIT\r"
-expect "Partition name? ";             send -- "ZZ3461\r"
+expect "Enter command line options: "; send -- "-DISK 3461 -FMT -NEWDSK -BADLEV 0 -NOFLMP -SPLIT 40000 -NQ -DBS OFF -SEC FOR\r"
+expect "Partition name? ";             send -- "SYS234\r"
 expect "Disk type? ";                  send -- "MODEL_4860\r"
-expect "Decimal records for paging? "; send -- "40000\r"
-expect "> ";                           send -- "1\r"
 expect "CP> ";                         send -- "SYSCLR\r"
 
-expect "CP> ";                         send -- "ASSIGN MT0 primos_22.1.4/primos_22.1.4_1of3.tap\r"
-expect "CP> ";                         send -- "ASSIGN MT1 primos_22.1.4/primos_22.1.4_2of3.tap\r"
-expect "CP> ";                         send -- "ASSIGN MT2 primos_22.1.4/primos_22.1.4_3of3.tap\r"
+expect "CP> ";                         send -- "ASSIGN MT1 m234u1.tap\r"
+expect "CP> ";                         send -- "ASSIGN MT2 m234u2.tap\r"
+expect "CP> ";                         send -- "ASSIGN MT3 m234v1.tap\r"
+expect "CP> ";                         send -- "ASSIGN MT4 m234c1.tap\r"
+expect "CP> ";                         send -- "ASSIGN MT5 m234ic.tap\r"
 
-expect "CP> ";                         send -- "BOOT 14045\r"
-expect "CP> ";                         send -- "ALTER R 01004 03410 03735 034006\r"
-expect "CP> ";                         send -- "RUN\r"
+expect "CP> ";                         send -- "SERIAL 022212\r"
+expect "CP> ";                         send -- "BOOT 04625\r"
+# expect "CP> ";                         send -- "ALTER R 01004 03410 03735 034006\r"
+# expect "CP> ";                         send -- "trace off /tmp/pp\r"
+# expect "CP> ";                         send -- "RUN\r"
+
+expect "PHYSICAL DEVICE=";             send -- "MT0\r"
 
 expect "Enter COMmand DEVice: ";       send -- "3461\r"
 expect "Enter PAGING device: ";        send -- "3461\r"
 expect "Enter Number Terminal USeRs: ";send -- "1\r"
-expect "Enter system name:  ";         send -- "EM50\r"
+expect "Enter SYStem NAMe:  ";         send -- "EM50\r"
 
 expect "OK, "; sleep 4;                send -- "AS MT0\r"
 expect "OK, ";                         send -- "AS MT1\r"
 expect "OK, ";                         send -- "AS MT2\r"
+expect "OK, ";                         send -- "AS MT3\r"
+expect "OK, ";                         send -- "AS MT4\r"
+expect "OK, ";                         send -- "AS MT5\r"
 
 expect "OK, ";                         send -- "A MFD\r"
 
-expect "OK, ";                         send -- "MTRESUME MT0 MAGRST.SAVE\r"
-expect "Tape unit (9 Trk): ";          send -- "0\r"
+sleep 15;
+
+expect "OK, ";                         send -- "MTRESUME MT0 MAGRST.RUN\r"
+expect "Tape unit: ";                  send -- "1\r"
 expect "Enter logical tape number: ";  send -- "1\r"
 expect "Ready to Restore: ";           send -- "YES\r"
 
-expect "OK, ";                         send -- "START\r"
-expect "Tape unit (9 Trk): ";          send -- "0\r"
-expect "Enter logical tape number: ";  send -- "2\r"
-expect "Ready to Restore: ";           send -- "YES\r"
-expect "Tape unit (9 Trk): ";          send -- "1\r"
-
-expect "OK, ";                         send -- "START\r"
-expect "Tape unit (9 Trk): ";          send -- "1\r"
-expect "Enter logical tape number: ";  send -- "2\r"
-expect "Ready to Restore: ";           send -- "YES\r"
-expect "Tape unit (9 Trk): ";          send -- "2\r"
-
-expect "OK, ";                         send -- "START\r"
-expect "Tape unit (9 Trk): ";          send -- "2\r"
-expect "Enter logical tape number: ";  send -- "2\r"
+expect "OK, ";                         send -- "MTRESUME MT0 MAGRST.RUN\r"
+expect "Tape unit: ";                  send -- "2\r"
+expect "Enter logical tape number: ";  send -- "1\r"
 expect "Ready to Restore: ";           send -- "YES\r"
 
-expect "OK, ";                         send -- "START\r"
-expect "Tape unit (9 Trk): ";          send -- "2\r"
-expect "Enter logical tape number: ";  send -- "3\r"
+expect "OK, ";                         send -- "MTRESUME MT0 MAGRST.RUN\r"
+expect "Tape unit: ";                  send -- "3\r"
+expect "Enter logical tape number: ";  send -- "1\r"
 expect "Ready to Restore: ";           send -- "YES\r"
 
-expect "OK, ";                         send -- "START\r"
-expect "Tape unit (9 Trk): ";          send -- "2\r"
-expect "Enter logical tape number: ";  send -- "4\r"
+expect "OK, ";                         send -- "MTRESUME MT0 MAGRST.RUN\r"
+expect "Tape unit: ";                  send -- "4\r"
+expect "Enter logical tape number: ";  send -- "1\r"
+expect "Ready to Restore: ";           send -- "YES\r"
+
+expect "OK, ";                         send -- "MTRESUME MT0 MAGRST.RUN\r"
+expect "Tape unit: ";                  send -- "5\r"
+expect "Enter logical tape number: ";  send -- "1\r"
 expect "Ready to Restore: ";           send -- "YES\r"
 
 expect "OK, ";                         send -- "A CMDNC0\r"
@@ -100,9 +110,9 @@ expect "INPUT\r"; sleep 1
   send -- "CONFIG -DATA CONFIG\r"
   send -- "OPR 1\r"
   send -- "SHARE SYSTEM>ED2000 2000\r"
-  send -- "SHARE SYSTEM>F2021A 2021 700\r"
-  send -- "SHARE SYSTEM>F2021B 2021 700\r"
-  send -- "R SYSTEM>F4000 1/4\r"
+  send -- "* SHARE SYSTEM>F2021A 2021 700\r"
+  send -- "* SHARE SYSTEM>F2021B 2021 700\r"
+  send -- "* R SYSTEM>F4000 1/4\r"
   send -- "SHARE 2021\r"
   send -- "OPR 0\r"
 # send -- "START_DSM\r"
@@ -138,14 +148,14 @@ expect "invocations per command level: "; send -- "16\r"
 expect "dynamic segments: ";           send -- "128\r"
 expect "static segments: ";            send -- "128\r"
 expect "Groups: ";                     send -- "\r"
-expect "Initial attach point: ";       send -- "<ZZ3461>SYSTEM\r"
-expect "Create/change user attributes? "; send -- "NO\r"
-expect "Groups: ";                     send -- "\r"
 expect "Initial attach point: ";       send -- "\r"
 expect "Number of command levels: ";   send -- "\r"
 expect "invocations per command level: "; send -- "\r"
 expect "dynamic segments: ";           send -- "\r"
 expect "static segments: ";            send -- "\r"
+expect "Groups: ";                     send -- "\r"
+expect "Initial attach point: ";       send -- "<SYS234>SYSTEM\r"
+expect "Create/change user attributes? "; send -- "NO\r"
 expect "Check entry? ";                send -- "NO\r"
 expect "> ";                           send -- "SD -ON\r"
 expect "> ";                           send -- "QUIT\r"
