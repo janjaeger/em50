@@ -43,6 +43,7 @@
 #ifndef _flpt_h
 #define _flpt_h
 
+
 #ifdef DEBUG
 #define logdac(_c, _s, _a) \
 do { \
@@ -54,7 +55,94 @@ do { \
 #define logdac(_c, _s, _a)
 #endif
 
-static inline double to_dbl(uint64_t dbl)
+
+#ifdef FLOAT128
+typedef union {
+  __int128_t  i;
+  __uint128_t u;
+  struct {
+    int64_t  il;
+    int64_t  ih;
+  };
+  struct {
+    uint64_t ul;
+    uint64_t uh;
+  };
+} xint128;
+assert_size(xint128, 16);
+
+static inline __float128 to_qad(__uint128_t qad)
+{
+em50_qad v = {.q = qad};
+ieee_qad r = {.sign = v.dbl.sign, .mantissa = v.dbl.mantissa, .exponent = v.dbl.exponent};
+
+  if(!v.dbl.mantissa && !v.qex.mantissa && !v.dbl.exponent) return r.qad;
+
+  if(!(r.sign = v.dbl.sign))
+  {
+    r.mantissa = ((__uint128_t)v.dbl.mantissa << (17+48+1)) | ((__uint128_t)v.qex.mantissa << (17+1));
+    r.exponent = 16383 + v.dbl.exponent - 129;
+  }
+  else
+  {
+    if(v.dbl.mantissa == 0 && v.qex.mantissa == 0)
+    {
+      r.exponent  = 16383 + v.dbl.exponent - 128;
+      r.mantissa = 0;
+    }
+    else
+    {
+      r.exponent  = 16383 + v.dbl.exponent - 129;
+      xint128 m = {.uh = v.dbl.mantissa | 0xffffc00000000000ULL, .ul = 0};
+      m.i >>= 16;
+      m.ul |= v.qex.mantissa;
+      m.i = -m.i;
+      r.mantissa = m.u << 17;
+    }
+  }
+
+  return r.qad;
+}
+
+static inline __uint128_t from_qad(__float128 qad)
+{
+ieee_qad v = {.qad = qad};
+em50_qad r;
+
+  if(!v.mantissa && !v.exponent) return v.qad;
+
+  if(!(r.dbl.sign = v.sign))
+  {
+    r.dbl.exponent  = 129 + v.exponent - 16383;
+    r.dbl.mantissa = (v.mantissa >> (17+48+1)) | (1ULL << 46);
+    r.qex.mantissa = v.mantissa >> (17+1);
+  }
+  else
+  {
+    if(v.mantissa == 0)
+    {
+      r.dbl.exponent  = 128 + v.exponent - 16383;
+      r.dbl.mantissa = 0;
+      r.qex.mantissa = 0;
+    }
+    else
+    {
+      r.dbl.exponent  = 129 + v.exponent - 16383;
+      xint128 m = {.u = v.mantissa};
+      m.uh |= 0xffff000000000000ULL;
+      m.i = -m.i;
+      r.dbl.mantissa = m.u >> (17+48+1);
+      r.qex.mantissa = m.u >> (17+1);
+    }
+  }
+
+  r.qex.reserved = 0;
+
+  return r.q;
+}
+#endif
+
+static inline FLOAT to_dbl(uint64_t dbl)
 {
 em50_dbl v = {.q = dbl};
 ieee_dbl r = {.sign = v.sign, .mantissa = v.mantissa, .exponent = v.exponent};
@@ -64,7 +152,7 @@ ieee_dbl r = {.sign = v.sign, .mantissa = v.mantissa, .exponent = v.exponent};
   if(!(r.sign = v.sign))
   {
     r.exponent = 1023 + v.exponent - 129;
-    r.mantissa = ((uint64_t)v.mantissa << 6);
+    r.mantissa = ((uint64_t)v.mantissa << 6); // 6 = 52 - 47 + 1
   }
   else
   {

@@ -8,6 +8,7 @@ set timeout -1
 
 spawn em50
 expect "CP> ";                         send -- "ASSIGN MT0 m210bt.tap\r"
+expect "CP> ";                         send -- "ASSIGN 026:0 * MODEL_4860\r"
 
 expect "CP> ";                         send -- "BOOT 10005\r"
 expect "RUN FILE TREENAME=";           send -- "MAKE.SAVE\r"

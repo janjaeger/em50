@@ -72,6 +72,8 @@ static inline void set_crs(cpu_t *cpu, int nrs)
   cpu->crs->km.modals = modals;
 
   cpu->crs->km.crs = cpu->crn;
+
+  mm_ptlb(cpu);
 }
 
 #endif
@@ -164,8 +166,8 @@ static inline void E50X(store_rs)(cpu_t *cpu, int loc, uint32_t value)
     switch(loc) {
       case 0x08:
       case 0x09:
-      case 0x0A:
-      case 0x0B:
+      case 0x0a:
+      case 0x0b:
         loc ^= 1;
       default:
         cpu->crs->r[loc & 017] = value;
@@ -192,15 +194,8 @@ static inline uint32_t E50X(fetch_rs)(cpu_t *cpu, int loc)
   else if(loc & 0x0010)
   {
     switch(loc) {
-      case 0x0C:
-        return cpu->crs->pb & 0xffff0000;
       case 0x18:
         return E50X(timer_get)(cpu);
-      case 0x08:
-      case 0x09:
-      case 0x0A:
-      case 0x0B:
-        loc ^= 1;
       default:
         return cpu->crs->r[020 + (loc & 017)];
     }
@@ -212,8 +207,8 @@ static inline uint32_t E50X(fetch_rs)(cpu_t *cpu, int loc)
         return cpu->crs->pb & 0xffff0000;
       case 0x08:
       case 0x09:
-      case 0x0A:
-      case 0x0B:
+      case 0x0a:
+      case 0x0b:
         loc ^= 1;
       default:
         return cpu->crs->r[loc & 017];
@@ -296,12 +291,12 @@ static inline void pxm_intrchk(cpu_t *cpu, uint32_t v)
   cpu->srf.mrf.pswpb   = cpu->pb;
   cpu->srf.mrf.pswkeys = cpu->crs->km;
   cpu->crs->km.ie = 0;
-    
+
   S_RB(cpu, 0x00040000 | v);
   S_KEYS(cpu, 014000);
   set_cpu_mode(cpu, cpu->crs->km.mode);
-  
-  longjmp(cpu->endop, endop_nointr5); // FIXME TODO CHECK
+
+  longjmp(cpu->endop, endop_setjmp);
 }
 
 
@@ -322,11 +317,11 @@ fault_name(cpu->fault.vecoff), cpu->fault.offset, cpu->fault.vector,cpu->fault.v
 
   set_cpu_mode(cpu, km_e64v);
 
-  longjmp(cpu->endop, endop_nointr5); // FIXME TODO CHECK
+  longjmp(cpu->endop, endop_nointr1); // FIXME TODO CHECK
 }
 
 #endif
-  
+
 
 static inline void E50X(pxm_save)(cpu_t *cpu)
 {
@@ -337,7 +332,7 @@ logmsg("pxm_save crs %d pcb %8.8x, level %4.4x/%4.4x\n", cpu->crs->km.crs, owner
 
   pcb->last = to_be_16(cpu->crs->km.crs << 5);
 //E50X(vstore_wp)(cpu, owner + offsetin(pcb_t, last), cpu->crs->km.crs << 5);
-  
+
   S_P(cpu, cpu->pb);
 
   uint16_t smask = 0;
@@ -367,9 +362,9 @@ logmsg("pxm_save crs %d pcb %8.8x, level %4.4x/%4.4x\n", cpu->crs->km.crs, owner
   S_RB(cpu, cpu->pb); // Reset low order pb in crs
 
 //PRINTK("keys %6.6o\n", cpu->crs->km.keys);
-  cpu->crs->km.sd = 1;
   pcb->keys = to_be_16(G_KEYS(cpu));
 //E50X(vstore_wp)(cpu, owner + offsetin(pcb_t, keys), cpu->crs->km.keys);
+  cpu->crs->km.sd = 1;
 }
 
 
@@ -411,6 +406,8 @@ PRINTK("pxm_rest pcb %8.8x, level %4.4x smask %4.4x\n", pcba, cpu->srf.mrf.ppa, 
     }
   }
   S_RB(cpu, G_P(cpu));
+
+  mm_ptlb(cpu);
 
   cpu->crs->km.sd = 0;
 }
@@ -457,20 +454,25 @@ PRINTK("bfore KEYS/MODALS: %6.6o %6.6o\n", cpu->crs->km.keys, cpu->crs->km.modal
   int nrs = E50X(vfetch_wp)(cpu, pcba + offsetin(pcb_t, last)) >> 5;
   nrs &= em50_nrf - 1;
 
-PRINTK("\npcba %8.8x last %d crs %d\n", pcba, nrs, cpu->crs->km.crs);
+PRINTK("\npcba %8.8x last %d crs %d owner %8.8x\n", pcba, nrs, cpu->crs->km.crs, cpu->crs->owner);
 
+  if(pcb == cpu->crs->ownerl)
+  {
+PRINTK("\nreuse ppa\n");
+    mm_ptlb(cpu); // ???
+  }
+  else
   if(pcb == cpu->srf.urs[nrs].ownerl)
   {
 
 PRINTK("\nreuse ppa\n");
 
     set_crs(cpu, nrs);
-    mm_ptlb(cpu);
   }
   else
   {
     nrs = (cpu->crs->km.crs + 1) & (em50_nrf - 1);
-    while(nrs != cpu->crs->km.crs && !cpu->srf.urs[nrs].km.sd) // && cpu->srf.urs[nrs].km.in)
+    while(nrs != cpu->crs->km.crs && !cpu->srf.urs[nrs].km.sd)
       nrs = (nrs + 1) & (em50_nrf - 1);
 
     if(!cpu->srf.urs[nrs].km.sd)
@@ -480,7 +482,6 @@ PRINTK("\nreuse ppa\n");
 PRINTK("-> a pxm crs %d -> %d owner %8.8x -> %8.8x\n", cpu->crs->km.crs, nrs, cpu->crs->owner, pcba);
 
       set_crs(cpu, nrs);
-      mm_ptlb(cpu);
       E50X(pxm_save)(cpu);
     }
     else
@@ -489,11 +490,9 @@ PRINTK("-> a pxm crs %d -> %d owner %8.8x -> %8.8x\n", cpu->crs->km.crs, nrs, cp
 PRINTK("-> b pxm crs %d -> %d owner %8.8x -> %8.8x\n", cpu->crs->km.crs, nrs, cpu->crs->owner, pcba);
 
       set_crs(cpu, nrs);
-      mm_ptlb(cpu);
     }
 
     E50X(pxm_rest)(cpu, pcba, ppa);
-    mm_ptlb(cpu);
     E50X(vstore_wp)(cpu, pcba + offsetin(pcb_t, last), nrs << 5);
 
   }
@@ -509,7 +508,7 @@ PRINTK("-> b pxm crs %d -> %d owner %8.8x -> %8.8x\n", cpu->crs->km.crs, nrs, cp
 PRINTK("after KEYS/MODALS: %6.6o %6.6o\n", cpu->crs->km.keys, cpu->crs->km.modals);
   E50X(pxm_check)(cpu);
 
-  cpu->crs->km.ie = 1; // FIXME TODO UNSURE
+  cpu->crs->km.ie = 1;
 
 PRINTK("after KEYS/MODALS: %6.6o %6.6o\n", cpu->crs->km.keys, cpu->crs->km.modals);
 
@@ -679,8 +678,8 @@ PRINTK("ntfy level %4.4x levelc %4.4x tobol %d\n",level, levelc, tobol);
     cpu->srf.mrf.ppa = level;
     E50X(pxm_disp)(cpu);
   }
-else
-{
+  else
+  {
 PRINTK("nontfy\n");
 
     uint16_t ppb  = cpu->srf.mrf.ppb;
@@ -690,7 +689,7 @@ PRINTK("nontfy\n");
       cpu->srf.mrf.pcbb = pcba;
       E50X(pxm_disp)(cpu);
     }
-}
+  }
 
 PRINTK("ntfy ppa %4.4x ppb %4.4x tobol %d\n", cpu->srf.mrf.ppa, cpu->srf.mrf.ppb, tobol);
 

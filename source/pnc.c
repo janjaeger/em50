@@ -52,24 +52,26 @@
 #define PNC_TOKEN 'K'
 #define PNC_SIMTK 'S'
 #define PNC_INITP 'I'
-
-static const uint8_t pnc_rxrdy = PNC_RXRDY;
-static const uint8_t pnc_txrdy = PNC_TXRDY;
-static const uint8_t pnc_xconn = PNC_XCONN;
-static const uint8_t pnc_xdisc = PNC_XDISC;
-static const uint8_t pnc_token = PNC_TOKEN;
-static const uint8_t pnc_simtk = PNC_SIMTK;
-static const uint8_t pnc_initp = PNC_INITP;
+#define PNC_TSTOP 'O'
+#define PNC_RSTOP 'P'
 
 
 static int pnc_port = 0;
 
+
+static void pnc_post(pnc_t *pnc, uint8_t cmd)
+{
+  write(pnc->pipe[1], &cmd, 1);
+  pthread_yield();
+}
+
+
 static inline size_t pnc_dmx_copy(cpu_t *cpu, int ca, uint8_t *buffer, ssize_t len, int wr)
 {
-  if((ca & PNC_DMC))
-    return io_dmc_copy(cpu, ca & PNC_DMC_MASK, buffer, len, wr);
+  if(IO_IS_DMA(ca))
+    return io_dma_copy(cpu, IO_DMA_CH(ca), IO_DMX_CN(ca), buffer, len, wr, NULL);
   else
-    return io_dma_copy(cpu, ca & PNC_DMA_MASK, 0, buffer, len, wr);
+    return io_dmc_copy(cpu, ca, buffer, len, wr, NULL);
 }
 
 
@@ -86,7 +88,7 @@ struct servent *servent;
     if((servent = getservbyname(serv, "tcp")))
       return htons(servent->s_port);
 
-  logmsg("pnc %03o getservbyname(%s) failed", pnc->ctrl, serv);
+  logmsg("pnc %03o getservbyname(%s) failed\n", pnc->ctrl, serv);
   return 0;
 }
 
@@ -108,7 +110,7 @@ struct in_addr in_addr;
       return in_addr.s_addr;
     }
 
-  logmsg("pnc %03o gethostbyname(%s) failed", pnc->ctrl, host);
+  logmsg("pnc %03o gethostbyname(%s) failed\n", pnc->ctrl, host);
   return INADDR_NONE;
 }
 
@@ -208,6 +210,11 @@ cpu_t *cpu = pnc->cpu;
   char tname[16];
   snprintf(tname, sizeof(tname), "pnc %03o", pnc->ctrl);
   pthread_setname_np(pthread_self(), tname);
+  sigset_t set;
+  sigemptyset(&set);
+  sigaddset(&set, SIGINT);
+  sigaddset(&set, SIGTSTP);
+  pthread_sigmask(SIG_BLOCK, &set, NULL);
 
   int sock;
   do {
@@ -316,9 +323,9 @@ cpu_t *cpu = pnc->cpu;
       for(link_t *l = pnc->link; l; l = l->next)
         if(l->fd >= 0 && FD_ISSET(l->fd, &fdset))
         {
+          FD_CLR(l->fd, &fdset);
           if(pnc_recv(l->fd, &l->rb) < 0)
             pnc_disconnect(pnc, l);
-          FD_CLR(l->fd, &fdset);
         }
     }
 
@@ -334,20 +341,37 @@ cpu_t *cpu = pnc->cpu;
           case PNC_TXRDY:
             pnc->txrdy = 1;
             break;
+          case PNC_RSTOP:
+            pnc->rxrdy = 0;
+            pnc->rs &= ~(PNC_RS_BUSY);
+            break;
+          case PNC_TSTOP:
+            pnc->txrdy = 0;
+            pnc->ts &= ~(PNC_TS_BUSY);
+            break;
           case PNC_XCONN:
-            pnc->ns |= PNC_NS_CONN|PNC_NS_TD;
+            pnc->ns |= PNC_NS_CONN;
             break;
           case PNC_XDISC:
-            pnc->ns &= ~(PNC_NS_CONN|PNC_NS_TD);
+            pnc->ns &= ~(PNC_NS_CONN|PNC_NS_TD|PNC_NS_TXI|PNC_NS_RXI);
+            pnc->ts |= PNC_TS_BUSY;
+            pnc->rs |= PNC_RS_BUSY;
+            io_clrint(cpu, &pnc->inttx);
+            io_clrint(cpu, &pnc->intrx);
             break;
           case PNC_TOKEN:
             pnc->ns |= PNC_NS_TD;
+            pnc->ns |= PNC_NS_RXI;
+            io_setintv(cpu, &pnc->intrx, PNC_RX_VEC(pnc->iv));
             break;
           case PNC_SIMTK:
             pnc->ns |= PNC_NS_TD;
+            io_setintv(cpu, &pnc->intrx, PNC_TX_VEC(pnc->iv));
             break;
           case PNC_INITP:
             pnc->ns = 0;
+            pnc->ts = 0;
+            pnc->rs = 0;
             pnc->txrdy = 0;
             pnc->rxrdy = 0;
             pnc->im = 0;
@@ -452,8 +476,7 @@ cpu_t *cpu = pnc->cpu;
 
           pnc_dmx_copy(cpu, pnc->rx, l->rb.data.buff, n, 0);
           pnc->rxrdy = 0;
-          pnc->rs |= 0; // PNC_RS_BUSY;
-          pnc->ns |= PNC_NS_RXI;
+          pnc->ns |= PNC_NS_RXI; //|PNC_NS_TD;
           if(pnc->im)
             io_setintv(cpu, &pnc->intrx, PNC_RX_VEC(pnc->iv));
 
@@ -471,8 +494,14 @@ cpu_t *cpu = pnc->cpu;
 
 static void pnc_init(cpu_t *cpu, int type, int ext, int func, int ctrl, pnc_t **pnc, int argc, char *argv[])
 {
+  if(cpu->sys->pncport && !strcasecmp(cpu->sys->pncport, "none"))
+  {
+    (*pnc) = NULL;
+    return;
+  }
+
   (*pnc) = calloc(1, sizeof(pnc_t));
-  (*pnc)->id = io_id(061, ctrl);
+  (*pnc)->id = io_id(007, ctrl);
   (*pnc)->ctrl = ctrl;
 
   pthread_cond_init(&(*pnc)->pthread.cond, NULL);
@@ -516,21 +545,25 @@ pnc_t *pnc = *devparm;
           logmsg("pnc %03o Receive Status (%4.4x)\n", ctrl, pnc->rs);
           S_A(cpu, pnc->rs);
           break;
-        case 013:
+        case 013: // 013
           logmsg("pnc %03o Transmit Status (%4.4x)\n", ctrl, pnc->ts);
           S_A(cpu, pnc->ts);
           break;
         case 014:
+          pnc->rx ^= 0xf000;
+          pnc->rx &= 0xFFFE;
           logmsg("pnc %03o Receive DMx Channel (%4.4x)\n", ctrl, pnc->rx);
           S_A(cpu, pnc->rx);
           break;
-        case 015:
+        case 015: // 015
+          pnc->tx ^= 0xf000;
+          pnc->tx &= 0xFFFE;
           logmsg("pnc %03o Transmit DMx Channel (%4.4x)\n", ctrl, pnc->tx);
           S_A(cpu, pnc->tx);
           break;
         case 016:
-          logmsg("pnc %03o Diagnostic Reg\n", ctrl);
-          S_A(cpu, 0);
+          logmsg("pnc %03o Diagnostic Register (%4.4x)\n", ctrl, pnc->dr);
+          S_A(cpu, pnc->dr);
           break;
         case 017:
           logmsg("pnc %03o Network Status (%4.4x)\n", ctrl, (pnc->ns & 0xff00) | pnc->nn);
@@ -553,16 +586,21 @@ pnc_t *pnc = *devparm;
           break;
         case 011:
           logmsg("pnc %03o Diagnostic Output %4.4x\n", ctrl, G_A(cpu));
+          pnc->dr = G_A(cpu);
           break;
         case 014:
           logmsg("pnc %03o Receive DMx Channel %4.4x\n", ctrl, G_A(cpu));
+          if(!(pnc->ns & PNC_NS_CONN))
+            return 0;
           pnc->rx = G_A(cpu);
-          write(pnc->pipe[1], &pnc_rxrdy, 1);
+          pnc_post(pnc, PNC_RXRDY);
           break;
         case 015:
           logmsg("pnc %03o Transmit DMx Channel %4.4x\n", ctrl, G_A(cpu));
+          if(!(pnc->ns & PNC_NS_CONN))
+            return 0;
           pnc->tx = G_A(cpu);
-          write(pnc->pipe[1], &pnc_txrdy, 1);
+          pnc_post(pnc, PNC_TXRDY);
           break;
         case 016:
           logmsg("pnc %03o Int Vector %4.4x\n", ctrl, G_A(cpu));
@@ -580,19 +618,19 @@ pnc_t *pnc = *devparm;
       switch(func) {
         case 000:
           logmsg("pnc %03o Disconnect\n", ctrl);
-          write(pnc->pipe[1], &pnc_xdisc, 1);
+          pnc_post(pnc, PNC_XDISC);
           break;
         case 001:
           logmsg("pnc %03o Connect\n", ctrl);
-          write(pnc->pipe[1], &pnc_xconn, 1);
+          pnc_post(pnc, PNC_XCONN);
           break;
         case 002:
           logmsg("pnc %03o Transmit Token\n", ctrl);
-          write(pnc->pipe[1], &pnc_token, 1);
+          pnc_post(pnc, PNC_TOKEN);
           break;
         case 003:
           logmsg("pnc %03o Simulate Token\n", ctrl);
-          write(pnc->pipe[1], &pnc_simtk, 1);
+          pnc_post(pnc, PNC_SIMTK);
           break;
         case 004:
           logmsg("pnc %03o Ackn Transmit Int\n", ctrl);
@@ -611,9 +649,11 @@ pnc_t *pnc = *devparm;
           break;
         case 010:
           logmsg("pnc %03o Stop Transmission\n", ctrl);
+          pnc_post(pnc, PNC_TSTOP);
           break;
         case 011:
           logmsg("pnc %03o Stop Receive\n", ctrl);
+          pnc_post(pnc, PNC_RSTOP);
           break;
         case 012:
           logmsg("pnc %03o Set Normal Mode\n", ctrl);
@@ -643,7 +683,8 @@ pnc_t *pnc = *devparm;
           break;
         case 017:
           logmsg("pnc %03o Initialize\n", ctrl);
-          write(pnc->pipe[1], &pnc_initp, 1);
+          pnc->im = 0;
+          pnc_post(pnc, PNC_INITP);
           break;
         default:
           logall("pnc %03o unsupported OCP order %03o\n", ctrl, func);

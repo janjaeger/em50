@@ -36,6 +36,8 @@
 
 #include "prcex.h"
 
+#include "io.h"
+
 
 E50I(lpsw)
 {
@@ -46,13 +48,17 @@ E50I(lpsw)
   E50X(rxm_check)(cpu);
 
   uint32_t pb = E50X(vfetch_d)(cpu, ap);
-  km_t km = { .d = E50X(vfetch_d)(cpu, ap + 2) };
+  km_t km = { .d = E50X(vfetch_d)(cpu, intraseg_i(ap, 2)) };
 
   S_RB(cpu, pb);
+
+  if((cpu->crs->km.sm ^ km.sm))
+    mm_ptlb(cpu);
 
   cpu->crs->km = km;
   set_crs(cpu, km.crs);
 
+logmsg("km.in %d km.sd %d\n", km.in, km.sd);
   if(km.in)
     E50X(pxm_disp)(cpu);
 
@@ -85,9 +91,9 @@ int16_t a = G_A(cpu);
     etimer += itimerh - a;
     itimerh = a;
 
-    E50X(timer_set)(cpu, (itimerh << 16) | (timer & 0x0000ffff));
-
     E50X(vstore_d)(cpu, owner + offsetin(pcb_t, etimer), etimer);
+
+    E50X(timer_set)(cpu, (itimerh << 16) | (timer & 0x0000ffff));
   }
 }
 
@@ -102,12 +108,12 @@ uint32_t ea = G_XB(cpu);
 
   int32_t timer = E50X(timer_get)(cpu);
 
-  E50X(vstore_d)(cpu, ea + 1, timer);
+  E50X(vstore_d)(cpu, intraseg_i(ea, 1), timer);
   
   if(cpu->crs->km.pxm)
   {
     timer >>= 16;
-    timer += (int32_t)E50X(vfetch_d)(cpu, owner + offsetin(pcb_t, etimer));
+    timer += (int32_t)E50X(vfetch_dp)(cpu, owner + offsetin(pcb_t, etimer));
     E50X(vstore_d)(cpu, ea, timer);
   }
   else
@@ -126,7 +132,7 @@ uint32_t l = G_L(cpu);
 
   mm_itlb(cpu, ap);
   mm_itlb(cpu, l);
-  cpu->iotlb.i[IOTLB_INDEX(ap)] = E50X(v2r)(cpu, ap, acc_nn) & em50_page_mask;
+  i2r(cpu, ap);
 }
 
 
@@ -194,12 +200,12 @@ uint32_t ea = G_XB(cpu);
 
   E50X(rxm_check)(cpu);
 
-  E50X(vstore_d)(cpu, ea + 000, stpm_number);
-  E50X(vstore_w)(cpu, ea + 002, stpm_ucodeman);
-  E50X(vstore_w)(cpu, ea + 003, stpm_ucodeeng);
-  E50X(vstore_w)(cpu, ea + 004, stpm_ucodepln);
-  E50X(vstore_w)(cpu, ea + 005, stpm_ucodeext);
-  E50X(vstore_d)(cpu, ea + 006, 0x00000000);
+  E50X(vstore_d)(cpu, intraseg_i(ea, 000), stpm_number);
+  E50X(vstore_w)(cpu, intraseg_i(ea, 002), stpm_ucodeman);
+  E50X(vstore_w)(cpu, intraseg_i(ea, 003), stpm_ucodeeng);
+  E50X(vstore_w)(cpu, intraseg_i(ea, 004), stpm_ucodepln);
+  E50X(vstore_w)(cpu, intraseg_i(ea, 005), stpm_ucodeext);
+  E50X(vstore_d)(cpu, intraseg_i(ea, 006), 0x00000000);
 }
 
 
@@ -209,12 +215,12 @@ uint32_t ea = G_XB(cpu);
 
   logop1o(op, "sssn", ea);
 
-  E50X(vstore_d)(cpu, ea + 000, from_be_32(cpu->sys->serd[0]));
-  E50X(vstore_d)(cpu, ea + 002, from_be_32(cpu->sys->serd[1]));
-  E50X(vstore_d)(cpu, ea + 004, from_be_32(cpu->sys->serd[2]));
-  E50X(vstore_d)(cpu, ea + 006, from_be_32(cpu->sys->serd[3]));
-  E50X(vstore_q)(cpu, ea + 010, 0);
-  E50X(vstore_q)(cpu, ea + 014, 0);
+  E50X(vstore_d)(cpu, intraseg_i(ea, 000), from_be_32(cpu->sys->serd[0]));
+  E50X(vstore_d)(cpu, intraseg_i(ea, 002), from_be_32(cpu->sys->serd[1]));
+  E50X(vstore_d)(cpu, intraseg_i(ea, 004), from_be_32(cpu->sys->serd[2]));
+  E50X(vstore_d)(cpu, intraseg_i(ea, 006), from_be_32(cpu->sys->serd[3]));
+  E50X(vstore_q)(cpu, intraseg_i(ea, 010), 0);
+  E50X(vstore_q)(cpu, intraseg_i(ea, 014), 0);
 }
 
 
@@ -225,6 +231,8 @@ uint16_t a = G_A(cpu);
 
   logop1o(op, "*lpid", a);
 #endif
+
+  E50X(rxm_check)(cpu);
 }
 
 
@@ -308,7 +316,7 @@ static inline uint16_t E50X(rsave)(cpu_t *cpu, uint32_t a)
 {
   uint16_t mask = 0;
 
-  for(uint16_t r = 013, m = 0x0800; m; m >>= 1, r--, a += 2)
+  for(uint16_t r = 013, m = 0x0800; m; m >>= 1, r--)
   {
     int e; // endianess corrected r
     switch(r) {
@@ -324,10 +332,14 @@ static inline uint16_t E50X(rsave)(cpu_t *cpu, uint32_t a)
 logmsg("-> rsave m %4.4x r %d\n", m, r);
     if(cpu->crs->r[e])
     {
+      uint32_t v = cpu->crs->r[e];
       mask |= m;
-      E50X(vstore_d)(cpu, a, cpu->crs->r[e]);
-logmsg("-> rsave m %4.4x v %8.8x\n", m, cpu->crs->r[e]);
+//if(r == 0x0b || r == 0x09) v = (v >> 16) | (v << 16);
+      E50X(vstore_d)(cpu, a, v);
+logmsg("-> rsave m %4.4x v %8.8x\n", m, v);
     }
+
+    a = intraseg_i(a, 2);
   }
   E50X(vstore_d)(cpu, a, G_XB(cpu));
 
@@ -340,7 +352,7 @@ uint32_t ap = E50X(vfetch_iap)(cpu, NULL);
 
   logop1o(op, "rsav", ap);
 
-  uint16_t mask = E50X(rsave)(cpu, ap + 1);
+  uint16_t mask = E50X(rsave)(cpu, intraseg_i(ap, 1));
   
   E50X(vstore_w)(cpu, ap, mask);
 logmsg("-> rsav mask %4.4x\n", mask);
@@ -348,7 +360,7 @@ logmsg("-> rsav mask %4.4x\n", mask);
 
 static inline void E50X(rrest)(cpu_t *cpu, uint16_t mask, uint32_t a)
 {
-  for(uint16_t r = 013, m = 0x0800; m; m >>= 1, r--, a += 2)
+  for(uint16_t r = 013, m = 0x0800; m; m >>= 1, r--)
   {
     int e; // endianess corrected r
     switch(r) {
@@ -364,14 +376,18 @@ static inline void E50X(rrest)(cpu_t *cpu, uint16_t mask, uint32_t a)
 logmsg("-> rrst m %4.4x r %d\n", m, r);
     if((mask & m))
     {
-      cpu->crs->r[e] = E50X(vfetch_d)(cpu, a);
-logmsg("-> rrst m %4.4x v %8.8x\n", m, cpu->crs->r[e]);
+      uint32_t v = E50X(vfetch_d)(cpu, a);
+//if(r == 0x0b || r == 0x09) v = (v >> 16) | (v << 16);
+      cpu->crs->r[e] = v;
+logmsg("-> rrst m %4.4x v %8.8x\n", m, v);
     }
     else
     {
       cpu->crs->r[e] = 0;
 logmsg("-> rrst m %4.4x v zero\n", m);
     }
+
+    a = intraseg_i(a, 2);
   }
   S_XB(cpu, E50X(vfetch_d)(cpu, a));
 }
@@ -382,10 +398,10 @@ uint32_t ap = E50X(vfetch_iap)(cpu, NULL);
 
   logop1o(op, "rrst", ap);
 
-  uint16_t mask = E50X(vfetch_w)(cpu, ap++);
+  uint16_t mask = E50X(vfetch_w)(cpu, ap);
 logmsg("-> rrst mask %4.4x\n", mask);
 
-  E50X(rrest)(cpu, mask, ap);
+  E50X(rrest)(cpu, mask, intraseg_i(ap, 1));
 }
 
 

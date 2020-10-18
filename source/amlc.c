@@ -146,27 +146,51 @@ uint16_t dss = 0;
 }
 
 
+static inline int amlc_canrx(amlc_t *amlc)
+{
+cpu_t *cpu = amlc->cpu;
+uint32_t sta, end;
+
+  if(IO_IS_DMA(amlc->ca))
+  {
+    int nb = (amlc->ca & 0x02) ? -2 : 2;
+    uint32_t dma = IO_DMA_CH(amlc->ca + (amlc->ra ? nb : 0));
+    sta = G_DMA_A(cpu, dma);
+    end = (sta + G_DMA_L(cpu, dma)) - 1;
+  }
+  else
+  {
+    uint32_t dmc = IO_DMC_CH(amlc->ca) + (amlc->ra ? 2 : 0);
+    sta = ifetch_w(cpu, dmc);
+    end = ifetch_w(cpu, dmc + 1);
+  }
+
+  int rc = (!sta || !end || sta > end) ? 0 : 1;
+
+  return rc;
+}
+
+
 static inline void amlc_rxword(line_t *line, uint16_t word)
 {
 amlc_t *amlc = line->amlc;
 cpu_t *cpu = amlc->cpu;
-
-//usleep(5000); // DO NOT OVERRUN AMLC
 uint32_t dmx, sta, end;
 
-  if((amlc->ca & AMLC_DC_DMC))
+  if(IO_IS_DMA(amlc->ca))
   {
-    dmx = (amlc->ca & AMLC_DC_CHA) + (amlc->ra ? 2 : 0);
-    sta = ifetch_w(cpu, dmx);
-    end = ifetch_w(cpu, dmx + 1);
-  }
-  else
-  {
-    dmx = amlc->ca + (amlc->ra ? 1 : 0);
+    int nb = (amlc->ca & 0x02) ? -2 : 2;
+    dmx = IO_DMA_CH(amlc->ca + (amlc->ra ? nb : 0));
     sta = G_DMA_A(cpu, dmx);
     end = (sta + G_DMA_L(cpu, dmx)) - 1;
   }
-logmsg("amlc %03o %8.8x %8.8x %8.8x c'%c'\n", amlc->ctrl, dmx, sta, end, word & 0xff);
+  else
+  {
+    dmx = IO_DMC_CH(amlc->ca) + (amlc->ra ? 2 : 0);
+    sta = ifetch_w(cpu, dmx);
+    end = ifetch_w(cpu, dmx + 1);
+  }
+logmsg("amlc %03o %8.8x %8.8x %8.8x c'%c'\n", amlc->ctrl, dmx, sta, end, word & 0x7f);
 
   if(sta && sta <= end)
   {
@@ -174,27 +198,34 @@ logmsg("amlc %03o %8.8x %8.8x %8.8x c'%c'\n", amlc->ctrl, dmx, sta, end, word & 
 
     istore_w(cpu, sta++, lc);
 
-    if((amlc->ca & AMLC_DC_DMC))
-      istore_w(cpu, dmx, sta);
-    else
+    if(IO_IS_DMA(amlc->ca))
     {
       S_DMA_A(cpu, dmx, sta);
       S_DMA_L(cpu, dmx, (end - sta) + 1);
     }
+    else
+      istore_w(cpu, dmx, sta);
 
-    if(sta > end) 
+logmsg("amlc %03o stored %8.8x %8.8x %8.8x %4.4x c'%c'\n", amlc->ctrl, dmx, sta, end, word, word & 0x7f);
+    if(sta > end)
     {
       amlc->st |= AMLC_ST_EOR;
       amlc->ra = !amlc->ra;
-logmsg("amlc %03o eor ra %d\n", amlc->ctrl, amlc->ra);
+logmsg("amlc %03o eor ra %d stat %4.4x int %4.4x ena %d\n", amlc->ctrl, amlc->ra, amlc->st, amlc->va, amlc->im);
     }
   }
+#if 1
+  else
+    logmsg("amlc %03o byte lost %d\n", amlc->ctrl, amlc->ra);
+#endif
 }
+
 
 static inline void amlc_rxchar(line_t *line, uint8_t ch)
 {
   amlc_rxword(line, AMLC_RX_VAL | ch);
 }
+
 
 static inline void amlc_rxbrk(line_t *line)
 {
@@ -319,6 +350,7 @@ line_t *line = amlc_getfreeline(cpu);
 
   return 0;
 }
+
 
 static inline void amlc_detach(line_t *line)
 {
@@ -447,6 +479,11 @@ fd_set fdset;
   char tname[16];
   snprintf(tname, sizeof(tname), "amlc-l %u", ntohs(bindsock.sin_port));
   pthread_setname_np(pthread_self(), tname);
+  sigset_t set;
+  sigemptyset(&set);
+  sigaddset(&set, SIGINT);
+  sigaddset(&set, SIGTSTP);
+  pthread_sigmask(SIG_BLOCK, &set, NULL);
 
   if(bind(sock, (struct sockaddr *)&bindsock, sizeof(bindsock)))
   {
@@ -518,7 +555,7 @@ static inline int amlc_send(line_t *line, uint8_t ch)
   if(line->ls != loop)
   {
 #ifdef LIBTELNET
-    char c = ch;
+    char c = ch & 0x7f;
     telnet_send(line->telnet, &c, 1);   
     return 1;
 #else
@@ -530,12 +567,13 @@ static inline int amlc_send(line_t *line, uint8_t ch)
 }
 
 
-static int amlc_recv(line_t *line, uint8_t *ch)
+static int amlc_recv(line_t *line)
 {
+int rc;
+char c;
+
   if(line->ls != loop)
   {
-  int rc;
-  char c;
 #ifdef LIBTELNET
     rc = recv(line->fdr, &c, 1, 0);
     if(rc == 1)
@@ -545,34 +583,16 @@ static int amlc_recv(line_t *line, uint8_t *ch)
     if(rc == 1)
       amlc_rxchar(line, c);
 #endif
-    return rc;
-  }
-  else
-    return read(line->fdr, ch, 1);
-}
-
-
-static inline int amlc_canrx(amlc_t *amlc)
-{
-cpu_t *cpu = amlc->cpu;
-uint32_t sta, end;
-
-  if((amlc->ca & AMLC_DC_DMC))
-  {
-    uint32_t dmc = (amlc->ca & AMLC_DC_CHA) + (amlc->ra ? 2 : 0);
-    sta = ifetch_w(cpu, dmc);
-    end = ifetch_w(cpu, dmc + 1);
   }
   else
   {
-    uint32_t dma = amlc->ca + (amlc->ra ? 1 : 0);
-    sta = G_DMA_A(cpu, dma);
-    end = (sta + G_DMA_L(cpu, dma)) - 1;
+    rc = read(line->fdr, &c, 1);
+    if(rc == 1)
+      amlc_rxchar(line, c);
   }
 
-  return (!sta || !end || sta > end) ? 0 : 1;
+  return rc;
 }
-
 
 static void *amlc_thread(void *parm)
 {
@@ -582,24 +602,34 @@ cpu_t *cpu = amlc->cpu;
   char tname[16];
   snprintf(tname, sizeof(tname), "amlc %03o", amlc->ctrl);
   pthread_setname_np(pthread_self(), tname);
+  sigset_t set;
+  sigemptyset(&set);
+  sigaddset(&set, SIGINT);
+  sigaddset(&set, SIGTSTP);
+  pthread_sigmask(SIG_BLOCK, &set, NULL);
 
   pthread_mutex_lock(&(amlc->pthread.mutex));
 
   while(amlc->pthread.tid)
   {
-    if(amlc->im && ((amlc->st & AMLC_ST_CTI1)
-                 || (amlc->st & AMLC_ST_DSC)
-                 || (amlc->st & AMLC_ST_EOR)))
+if(!amlc->in) amlc->in = 1;
+    if(amlc->im
+     && (amlc->st & (AMLC_ST_CTI1|AMLC_ST_DSC|AMLC_ST_EOR)))
+{
+logmsg("amlc %03o int stat %04x\n", amlc->ctrl, amlc->st);
       io_setintv(cpu, &(amlc->intr), amlc->va);
+}
 
     pthread_mutex_unlock(&(amlc->pthread.mutex));
+    int didsend = 0;
+
     for(int ln = 0; ln < (sizeof(amlc->ln)/sizeof(*amlc->ln)); ++ln)
     {
       line_t *line = &amlc->ln[ln];
 
       if(amlc->da != 0 && (line->cn & AMLC_CN_XMIT))
       {
-        uint32_t dmx = amlc->da | (ln << (amlc->dm ? 2 : 0));
+        uint32_t dmx = (amlc->da & 0xfff0) | (ln << (amlc->dm ? 2 : 0));
 
         uint16_t ch;
 
@@ -607,11 +637,12 @@ cpu_t *cpu = amlc->cpu;
         {
           while(!io_rtq(cpu, dmx, &ch))
           {
+            didsend = 1;
 logmsg("amlc %03o %4.4x '%c'\n", amlc->ctrl, ch, ch & 0x7f);
-            if(line->ls == onln && (ch & AMLC_TX_VAL))
+            if((line->ls == onln || line->ls == loop) && (ch & AMLC_TX_VAL))
             {
 logmsg("amlc %03o line %d '%c'\n", amlc->ctrl, ln, ch & 0x7f);
-              if(amlc_send(line, ch & 0x7f) != 1)
+              if(amlc_send(line, ch) != 1)
 logmsg("amlc %03o line %d send failed\n", amlc->ctrl, ln);
             }
           }
@@ -621,18 +652,21 @@ logmsg("amlc %03o line %d send failed\n", amlc->ctrl, ln);
           ch = ifetch_w(cpu, dmx);
           if(ch != 0)
           {
+            didsend = 1;
             istore_w(cpu, dmx, 0);
 logmsg("amlc %03o line %d fetch %4.4X %4.4x\n", amlc->ctrl, ln, dmx, ch);
-            if(line->ls == onln && (ch & AMLC_TX_VAL))
+            if((line->ls == onln || line->ls == loop) && (ch & AMLC_TX_VAL))
             {
 logmsg("amlc %03o line %d '%c'\n", amlc->ctrl, ln, ch & 0x7f);
-              if(amlc_send(line, ch & 0x7f) != 1)
+              if(amlc_send(line, ch) != 1)
 logmsg("amlc %03o line %d send failed\n", amlc->ctrl, ln);
             }
           }
         }
       }
     }
+    if(didsend)
+      io_idle_post(cpu);
 
     fd_set fdrset;
     int fdmax = -1;
@@ -674,7 +708,7 @@ logmsg("amlc %03o line %d connected\n",amlc->ctrl, ln);
         amlc->st |= (amlc->st & ~AMLC_ST_LINE) | ln | AMLC_ST_DSC;
         line->ds = (ln << 12) | AMLC_DS_DSC3 | AMLC_DS_DSC2 | AMLC_DS_DSC1;
 
-        goto interrupt;
+        continue;
       }
 
       if(line->ls == pend)
@@ -698,64 +732,67 @@ logmsg("amlc %03o line %d online\n",amlc->ctrl, ln);
         amlc->st |= (amlc->st & ~AMLC_ST_LINE) | ln | AMLC_ST_DSC;
 
         line->ds = (ln << 12) | AMLC_DS_DSC3 | AMLC_DS_DSC2 | AMLC_DS_DSC1;
-        goto interrupt;
+
+        continue;
       }
     }
 
-
-    struct timeval tv = { .tv_sec = 0, .tv_usec = 1000 };
+    struct timeval tv = { .tv_sec = 0, .tv_usec = didsend ? 1000 : 10000 };
     pthread_mutex_unlock(&(amlc->pthread.mutex));
     int rc = select(amlc_canrx(amlc) ? fdmax+1 : 0, &fdrset, NULL, NULL, &tv);
     pthread_mutex_lock(&(amlc->pthread.mutex));
 
+    int didrecv = 0;
     if(rc > 0)
     {
       for(int ln = 0; ln < (sizeof(amlc->ln)/sizeof(*amlc->ln)); ++ln)
       {
       line_t *line = &amlc->ln[ln];
   
+        if(!(line->cn & AMLC_CN_RECV))
+          continue;
+
         if(line->fdr < 0 || !FD_ISSET(line->fdr, &fdrset))
           continue;
 
         if(!amlc_canrx(amlc))
           continue;
 
-        uint8_t c;
-        if(amlc_recv(line, &c) != 1)
+        if(amlc_recv(line) != 1)
         {
 logmsg("amlc line %d closed\n", ln);
           amlc_detach(line);
 // TODO SET STATUS
           amlc->st |= (amlc->st & ~AMLC_ST_LINE) | ln | AMLC_ST_DSC;
           line->ds = (ln << 12);
-          goto interrupt;
+          continue;
         }
+        else
+          didrecv = 1;
 
-        if(line->fdr < 0 || (amlc->st & AMLC_ST_EOR))
-          goto interrupt;
+        if((line->cn & AMLC_CN_TIME) && !(amlc->st & AMLC_ST_EOR))
+          amlc->st |= (amlc->st & AMLC_ST_CTI1) ? (AMLC_ST_CTI1|AMLC_ST_CTI2) : AMLC_ST_CTI1;
+        continue;
       }
     }
-
-#if 1
-    if(rc == 0 && !(amlc->st & AMLC_ST_DSC) && !(amlc->st & AMLC_ST_EOR))
-    {
-      for(int ln = amlc->x; ln < (sizeof(amlc->ln)/sizeof(*amlc->ln)); ++ln)
+    else
+      for(int ln = 0; ln < (sizeof(amlc->ln)/sizeof(*amlc->ln)); ++ln)
       {
-        line_t *line = &amlc->ln[ln];
-if(++(amlc->x) >= (sizeof(amlc->ln)/sizeof(*amlc->ln))) amlc->x = 0;
-
-        if((line->cn & AMLC_CN_TIME))
+      line_t *line = &amlc->ln[ln];
+        if((line->cn & AMLC_CN_TIME) && !(amlc->st & AMLC_ST_EOR))
         {
-          amlc->st |= (amlc->st & ~AMLC_ST_LINE) | ln | ((amlc->st & AMLC_ST_CTI1) ? AMLC_ST_CTI2 : AMLC_ST_CTI1);
-logmsg("amlc %03o line %d cti %4.4x\n", amlc->ctrl, ln, amlc->st);
-          goto interrupt;
+          if((amlc->st & AMLC_ST_CTI1) && (amlc->st & AMLC_ST_LINE) != ln)
+          {
+            amlc->st = (amlc->st & ~AMLC_ST_LINE) | ln;
+            amlc->st |= AMLC_ST_CTI2 | ln;
+          }
+          else
+            amlc->st |= AMLC_ST_CTI1 | ln;
         }
       }
-//x = 0;
-    }
-#endif
 
-  interrupt:;
+    if(didrecv)
+      io_idle_post(cpu);
   }
 
   pthread_mutex_unlock(&(amlc->pthread.mutex));
@@ -766,6 +803,12 @@ logmsg("amlc %03o line %d cti %4.4x\n", amlc->ctrl, ln, amlc->st);
 
 static inline void amlc_init(cpu_t *cpu, int type, int ext, int func, int ctrl, amlc_t **amlc, int argc, char *argv[])
 {
+  if(cpu->sys->port && !strcasecmp(cpu->sys->port, "none"))
+  {
+    (*amlc) = NULL;
+    return;
+  }
+
   (*amlc) = calloc(1, sizeof(amlc_t));
   (*amlc)->id = io_id(020254, ctrl);
   (*amlc)->ctrl = ctrl;
@@ -807,11 +850,15 @@ amlc_t *amlc = *devparm;
 
   switch(type) {
     case IO_TYPE_INA:
+#if 1
+      pthread_mutex_lock(&(amlc->pthread.mutex));
+#else
       if(pthread_mutex_trylock(&(amlc->pthread.mutex)))
       {
         pthread_yield();
         return 0;
       }
+#endif
       switch(func) {
         case 000:  // Input Data Set Status
           if(amlc->dv >= 0)
@@ -830,12 +877,15 @@ amlc_t *amlc = *devparm;
           if(amlc->pthread.tid) amlc->st |= AMLC_ST_CLK;
           if(amlc->ra) amlc->st |= AMLC_ST_BUF;
           if(amlc->im) amlc->st |= AMLC_ST_IENA;
-          if(amlc->dm) amlc->st |= AMLC_ST_DIAG;
-          if(io_clrint(cpu, &amlc->intr))
-            logmsg("amlc %03o intr clear\n", amlc->ctrl);
+          if(amlc->dm) amlc->st |= AMLC_ST_DMQ;
           logmsg("amlc %03o Input and Clear Status %4.4X\n", ctrl, amlc->st);
           S_A(cpu, amlc->st);
-          amlc->st = 0;
+#if 1
+          if(io_clrint(cpu, &amlc->intr))
+            logmsg("amlc %03o intr clear\n", amlc->ctrl);
+          else
+#endif
+            amlc->st = 0;
           break;
         case 011:  // Input ID
           logmsg("amlc %03o Input ID %4.4x\n", ctrl, amlc->id);
@@ -859,11 +909,20 @@ amlc_t *amlc = *devparm;
       pthread_mutex_unlock(&(amlc->pthread.mutex));
       break;
     case IO_TYPE_OTA:
+      if(!amlc->in)
+      {
+        amlc->in = 1;
+        return 0;
+      }
+#if 1
+      pthread_mutex_lock(&(amlc->pthread.mutex));
+#else
       if(pthread_mutex_trylock(&(amlc->pthread.mutex)))
       {
         pthread_yield();
         return 0;
       }
+#endif
 
       {
         uint16_t a = G_A(cpu);
@@ -879,7 +938,7 @@ amlc_t *amlc = *devparm;
               amlc_loop(&amlc->ln[a >> 12]);
             if(!(amlc->ln[a >> 12].cf & AMLC_CF_LOOP) && amlc->ln[a >> 12].ls == loop)
               amlc_detach(&amlc->ln[a >> 12]);
-            if(!(amlc->ln[a >> 12].cf & AMLC_CF_DSC) && amlc->ln[a >> 12].ls != offl)
+            if((amlc->ln[a >> 12].cf & AMLC_CF_DSC) && amlc->ln[a >> 12].ls != offl)
               amlc_detach(&amlc->ln[a >> 12]);
             break;
           case 002:  // Output Line Control
@@ -893,6 +952,8 @@ amlc_t *amlc = *devparm;
           case 014:  // DMA/DMC Channel
             logmsg("amlc %03o Output DMA/DMC Channel %4.4x\n", ctrl, a);
             amlc->ca = a;
+            amlc->ra = 0;
+            io_clrint(cpu, &(amlc->intr));
             break;
           case 015:  // DMT base Address
             logmsg("amlc %03o Output DMT Base Address %4.4x\n", ctrl, a);
@@ -938,9 +999,18 @@ amlc_t *amlc = *devparm;
           break;
         case 017:   // Initialise
           logmsg("amlc %03o Initialise\n", ctrl);
-          io_clrint(cpu, &amlc->intr);
-          amlc->ra = 0;
-          amlc->st = 0;
+          if(amlc->in)
+          {
+            io_clrint(cpu, &amlc->intr);
+            amlc->ra = 0;
+            amlc->st = 0;
+            amlc->in = 0;
+            amlc->dm = 0;
+            amlc->im = 0;
+            amlc->ca = 0;
+            for(int l = 0; l > AMLC_LINES; ++l)
+              amlc_detach(&amlc->ln[l]);
+          }
           break;
         default:
           logall("amlc %03o unsupported OCP order %03o\n", ctrl, func);

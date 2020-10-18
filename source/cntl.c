@@ -90,6 +90,11 @@ cp_t *vcp = cpu->vcp;
   char tname[16];
   snprintf(tname, sizeof(tname), "vcp %03o", vcp->ctrl);
   pthread_setname_np(pthread_self(), tname);
+  sigset_t set;
+  sigemptyset(&set);
+  sigaddset(&set, SIGINT);
+  sigaddset(&set, SIGTSTP);
+  pthread_sigmask(SIG_BLOCK, &set, NULL);
 
   cp_clkinit(vcp);
 
@@ -99,6 +104,11 @@ cp_t *vcp = cpu->vcp;
 
     if((vcp->cr & SOC_CR_PICR))
       nsec <<= 5; // 102.4 / 3.2
+
+#if 0
+    if(cpu->sys->trace && cpu->sys->verbose)
+      nsec *=1000;
+#endif
 
     vcp->pthread.ts.tv_nsec += nsec;
     vcp->pthread.ts.tv_sec  += vcp->pthread.ts.tv_nsec / 1000000000ULL;

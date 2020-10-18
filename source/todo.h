@@ -29,11 +29,12 @@
 
 
 
-#undef  E50D
-#define E50D(_n) E50I(_n) \
+#undef  E5SD
+#define E5SD(_n) E50I(_n) \
 { \
   logop1(op,"*" #_n); \
-  E50X(uii_fault)(cpu, 0); \
+  E50X(rxm_check)(cpu); \
+  ++cpu->p; \
 }
 
 #undef  E51D
@@ -70,8 +71,8 @@ E51D(mdiw)
 E51D(mdrs)
 E5XD(mia)
 E52D(mib)
-E51D(viry)
-E51D(xvry)
+E5SD(viry)
+E5SD(xvry)
 E51D(wcs)
 
 E51D(epmj)

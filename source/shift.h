@@ -34,10 +34,7 @@
 
 static inline int shift_tc(int n)
 {
-  if(n != 0)
-    return -((n & 0b100000) ? ~(n ^ 0b111111) : n);
-  else 
-    return 64;
+  return 64 - n;
 }
 
 static inline int shift_op(op_t op)

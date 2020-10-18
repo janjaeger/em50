@@ -60,6 +60,9 @@ help_t help_assign = { "Assign file to a device",
 "where pnc is the octal device number, host is the optional hostname,\n"
 "and port is the port PNC is listening on,\n" };
 
+help_t help_load = { "Load file into memory",
+"Load saved file into memory." };
+
 help_t help_boot = { "Boot [options]",
 "Boot [l] [sense switches] [data switches] [A register] [B register] [X register] [keys]\n"
 "\n"

@@ -399,10 +399,12 @@ int16_t a = G_A(cpu);
 
   logop1(op, "caz");
 
-  int car, ovf;
-  sub_w(a, 0, &car, &ovf);
+  int eq, lt, car;
+  sba_w(a, 0, &eq, &lt, &car, NULL);
+
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
-  SET_CC(cpu, a);
 
   if(CC_LT(cpu))
     cpu->p += 2;
@@ -420,10 +422,12 @@ int16_t s = E50X(vfetch_w)(cpu, ea);
 
   logopxoo(op, "cas", ea, s & 0xffff);
 
-  int car, ovf;
-  sub_w(a, s, &car, &ovf);
+  int eq, lt, car;
+  sba_w(a, s, &eq, &lt, &car, NULL);
+
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
-  _SET_CC(cpu, a, s);
 
   if(CC_LT(cpu))
     cpu->p += 2;
@@ -441,10 +445,12 @@ int32_t s = E50X(vfetch_d)(cpu, ea);
 
   logop2oo(op, "cls", ea, s);
 
-  int car, ovf;
-  sub_d(l, s, &car, &ovf);
+  int eq, lt, car;
+  sba_d(l, s, &eq, &lt, &car, NULL);
+
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
-  _SET_CC(cpu, l, s);
 
   if(CC_LT(cpu))
     cpu->p += 2;

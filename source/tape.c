@@ -37,7 +37,7 @@
 #endif
 
 
-#if 0
+#if 1
 #undef logmsg
 #define logmsg(...) logall(__VA_ARGS__)
 #endif
@@ -49,21 +49,21 @@
 
 #ifdef DEBUG
 static const char *mtstat[] = { "TMK", "ERR", "EOM", "BOF", "BOT", "OFL", "ONL", "WTM" };
-static const char *drn[] = { "current status word", "id number", "dmx channel number", "vector interrupt addr" };
+static const char *drn[] = { "current status word", "id number", "dmx channel number", "vector interrupt addr", "current status word2" };
 #endif
 
-static inline size_t copy_io_buffer(cpu_t *cpu, mt_t *mt, uint8_t *buffer, ssize_t len, int write)
+static inline size_t copy_io_buffer(cpu_t *cpu, mt_t *mt, uint8_t *buffer, ssize_t len, int write, uint16_t *cr)
 {
-  if(!(mt->dc & MT_DC_DMC))
-    return io_dma_copy(cpu, mt->dc & 037, 040, buffer, len, write);
+  if(IO_IS_DMA(mt->dc))
+    return io_dma_copy(cpu, IO_DMA_CH(mt->dc), IO_DMX_CN(mt->dc), buffer, len, write, cr);
   else // DMC
-    return io_dmc_copy(cpu, mt->dc & MT_DC_CHA, buffer, len, write);
+    return io_dmc_copy(cpu, mt->dc, buffer, len, write, cr);
 }
 
 
 static inline void setsw(tm_t *tm, ssize_t rc)
 {
-  tm->sw = 0;
+  tm->sw = (tm->md == rd) ? MT_SW_PRO : 0;
 
   int st = mt_stat(tm);
 
@@ -93,9 +93,27 @@ static inline void setsw(tm_t *tm, ssize_t rc)
       tm->sw |= MT_SW_BOT;
       break;
     case MT_BOT:
-      tm->sw |= MT_SW_BOT; // | MT_SW_INT;
+      tm->sw |= MT_SW_BOT;
       break;
   }
+}
+
+
+static inline size_t two2one(uint8_t *buf, size_t len)
+{
+  for(ssize_t n = 0; n < len; n += 2)
+    buf[n >> 1] = buf[n|1];
+  return len >> 1;
+}
+
+static inline size_t one2two(uint8_t *buf, size_t len)
+{
+  for(ssize_t n = len - 1; n >= 0; --n)
+  {
+    buf[(n << 1)|1] = buf[n];
+    buf[n << 1] = 0;
+  }
+  return len << 1;
 }
 
 
@@ -104,17 +122,15 @@ static inline void motion_setup(mt_t *mt)
 cpu_t *cpu = mt->cpu;
 uint16_t order = mt->mo & 0xe0f0;
 int dev = mt_unit(mt->mo);
-ssize_t rc = 0;
+ssize_t rr, rc = 0;
   
-uint8_t buffer[65536];
+uint8_t buffer[65536<<1];
 
 uint8_t *addr = buffer;
 ssize_t len = sizeof(buffer);
 
   mt->sw = MT_SW_ONL;
-
-  if(!(mt->mo & 0x0100))
-    logmsg("tape %03o not supported: one byte / word\n", mt->ctrl);
+  mt->s2 = 0;
 
   if(dev < 0)
     dev = 0;
@@ -128,56 +144,73 @@ ssize_t len = sizeof(buffer);
   }
 
   switch(order) {
+    case 0x0010: // Erase GAP
+      logmsg("tape %03o:%d erase\n", mt->ctrl, dev);
+      rc = mt_erase(tm);
+      setsw(tm, rc);
+      break;
     case 0x0020: // Rewind
       logmsg("tape %03o:%d rewind\n", mt->ctrl, dev);
       rc = mt_rew(tm);
       setsw(tm, rc);
       mt_close(tm);
+      if(tm->sw == (MT_SW_RDY|MT_SW_ONL|MT_SW_BOT))
+        tm->sw = (MT_SW_ONL|MT_SW_REW);
       break;
     case 0x4080: // Read Record Forward
       logmsg("tape %03o:%d read\n", mt->ctrl, dev);
       rc = mt_read(tm, addr, len);
-      logmsg("tape %zd bytes\n", rc);
+      if(rc > 0 && !(mt->mo & 0x0100))
+        rc = one2two(buffer, rc);
       if(rc > 0)
-        rc = copy_io_buffer(cpu, mt, buffer, rc, 0);
-      setsw(tm, rc);
+        rr = copy_io_buffer(cpu, mt, buffer, rc, 0, &mt->dc);
+      logmsg("tape copy %zd bytes\n", rc > 0 ? rr : -rc);
+      setsw(tm, rc > 0 ? rr : rc);
+      if(rc > 0 && rr > 0 && rc > rr)
+        tm->sw |= MT_SW_DMX;
+      if(rc > 0)
+        rc = rr;
       break;
     case 0x6080: // Skip Record Forward
-      logmsg("tape %03o:%d fsr\n", mt->ctrl, dev);
-      rc = mt_read(tm, NULL, 0);
+      logmsg("tape %03o:%d fsr %u\n", mt->ctrl, dev, mt->ms+1);
+      rc = mt_fsr(tm, mt->ms);
       setsw(tm, rc);
       break;
     case 0x2080: // Skip File Forward
-      logmsg("tape %03o:%d fsf\n", mt->ctrl, dev);
-      rc = mt_fsf(tm);
+      logmsg("tape %03o:%d fsf %u\n", mt->ctrl, dev, mt->ms+1);
+      rc = mt_fsf(tm, mt->ms);
       setsw(tm, rc);
       break;
     case 0x4040: // Read Record Backward
       logmsg("tape %03o:%d rdbk\n", mt->ctrl, dev);
       rc = mt_rdbk(tm, addr, len);
-//    if(rc > 0)
-//      rc = copy_io_buffer(cpu, mt, buffer, rc, 0);
+      if(rc > 0 && !(mt->mo & 0x0100))
+        rc = one2two(buffer, rc);
+      if(rc > 0)
+        rc = copy_io_buffer(cpu, mt, buffer, rc, 0, &mt->dc);
       setsw(tm, rc);
       break;
     case 0x6040: // Skip Record Backward
-      logmsg("tape %03o:%d bsr\n", mt->ctrl, dev);
-      rc = mt_rdbk(tm, NULL, 0);
+      logmsg("tape %03o:%d bsr %u\n", mt->ctrl, dev, mt->ms+1);
+      rc = mt_bsr(tm, mt->ms);
       setsw(tm, rc);
       break;
     case 0x2040: // Skip File Backward
-      logmsg("tape %03o:%d bsf\n", mt->ctrl, dev);
-      rc = mt_bsf(tm);
+      logmsg("tape %03o:%d bsf %u\n", mt->ctrl, dev, mt->ms+1);
+      rc = mt_bsf(tm, mt->ms);
       setsw(tm, rc);
       break;
     case 0x4090: // Write (forward)
       logmsg("tape %03o:%d write\n", mt->ctrl, dev);
-      len = copy_io_buffer(cpu, mt, buffer, len, 1);
+      len = copy_io_buffer(cpu, mt, buffer, len, 1, &mt->dc);
+      if(len > 0 && !(mt->mo & 0x0100))
+        len = two2one(buffer, len);
       rc = mt_write(tm, addr, len);
       setsw(tm, rc);
       break;
     case 0x2090: // Write tape mark
       logmsg("tape %03o:%d write tape mark\n", mt->ctrl, dev);
-      rc = mt_write(tm, NULL, 0);
+      rc = mt_wtm(tm, mt->ms);
       setsw(tm, rc);
       break;
     case 0x8000: // Transport
@@ -186,15 +219,17 @@ ssize_t len = sizeof(buffer);
       break;
     default:
       logall("tape %03o invalid setup motion order %4.4x\n", mt->ctrl, order);
-    }
+      mt->s2 = (MT_S2_REJ|MT_S2_ILL);
+  }
 
+  mt->ms = 0;
   mt->sw = tm->sw;
   mt->pending = 1;
 
   if(rc > 0)
-    logmsg("tape %03o:%d %zd bytes transferred\n", mt->ctrl, dev, rc);
+    logmsg("tape %03o:%d %zd bytes transferred pos %lld\n", mt->ctrl, dev, rc, (long long int)lseek(tm->fd, 0, SEEK_CUR));
   else
-    logmsg("tape %03o:%d status %s\n", mt->ctrl, dev, mtstat[-rc]);
+    logmsg("tape %03o:%d status %s pos %lld\n", mt->ctrl, dev, mtstat[-rc], (long long int)lseek(tm->fd, 0, SEEK_CUR));
 
   if(mt->ff)
     io_setintv(cpu, &mt->intr, mt->va);
@@ -208,13 +243,18 @@ mt_t *mt = parm;
   char tname[16];
   snprintf(tname, sizeof(tname), "tape %03o", mt->ctrl);
   pthread_setname_np(pthread_self(), tname);
+  sigset_t set;
+  sigemptyset(&set);
+  sigaddset(&set, SIGINT);
+  sigaddset(&set, SIGTSTP);
+  pthread_sigmask(SIG_BLOCK, &set, NULL);
 
   pthread_mutex_lock(&mt->pthread.mutex);
   while(mt->pthread.tid)
   {
     pthread_cond_wait(&mt->pthread.cond, &mt->pthread.mutex);
-    mt->busy = 0;
     motion_setup(mt);
+    mt->busy = 0;
   }
   pthread_mutex_unlock(&mt->pthread.mutex);
   return NULL;
@@ -276,9 +316,17 @@ if(mt->pending) io_setintv(cpu, &mt->intr, mt->va);
           break;
         case 016: // Clear Interrupt Mask
           logmsg("tape %03o clear interrupt mask\n", mt->ctrl);
+          io_clrint(cpu, &mt->intr);
           mt->ff = 0;
           break;
         case 017: // Initialise
+          logmsg("tape %03o reset\n", mt->ctrl);
+          io_clrint(cpu, &mt->intr);
+          mt->busy = 0;
+          mt->ff = 0;
+          mt->in = 0;
+          mt->ms = 0;
+          break;
         default:
           logall("tape %03o unsupported OCP order %03o\n", mt->ctrl, func);
       }
@@ -291,6 +339,11 @@ if(mt->pending) io_setintv(cpu, &mt->intr, mt->va);
           break;
         case 001: // Skip if not busy
           logmsg("tape %03o skip if not busy\n", mt->ctrl);
+          if(!mt->in)
+          {
+            mt->in = 1;
+            return 0;
+          }
           return  mt->busy ? 0 : 1;
         case 004: // Skip if not Interrupting
           logmsg("tape %03o skip if not interrupting\n", mt->ctrl);
@@ -315,7 +368,12 @@ if(mt->pending) io_setintv(cpu, &mt->intr, mt->va);
         case 000: // Input Data Register
           logmsg("tape %03o input data register: %s: %4.4x\n", mt->ctrl, drn[mt->cdr], mt->dr[mt->cdr]);
           S_A(cpu, mt->dr[mt->cdr]);
-if(mt->cdr == current_status_word) mt->pending = 0;
+          if(mt->cdr == current_status_word)
+          {
+            if(mt->sw == (MT_SW_ONL|MT_SW_REW))
+              mt->sw = (MT_SW_RDY|MT_SW_ONL|MT_SW_BOT);
+            mt->pending = 0;
+          }
           break;
         default:
           logall("tape %03o unsupported INA order %03o\n", mt->ctrl, func);
@@ -323,11 +381,15 @@ if(mt->cdr == current_status_word) mt->pending = 0;
       pthread_mutex_unlock(&mt->pthread.mutex);
       break;
     case IO_TYPE_OTA:
+#if 0
       if(mt->busy || pthread_mutex_trylock(&mt->pthread.mutex))
       {
         pthread_yield();
         return 0;
       }
+#else
+      pthread_mutex_lock(&mt->pthread.mutex);
+#endif
       switch(func) {
         case 001:
           mt->mo = G_A(cpu);
@@ -336,30 +398,40 @@ if(mt->cdr == current_status_word) mt->pending = 0;
           pthread_cond_signal(&mt->pthread.cond);
           break;
         case 002: // Setup Data Register
-          switch(G_A(cpu) >> 12) {
-            case 0b1000:
+          switch(G_A(cpu) >> 11) {
+            case 0b10000:
               mt->cdr = current_status_word;
               break;
-            case 0b0100:
+            case 0b01000:
               mt->cdr = id_number;
               break;
-            case 0b0010:
+            case 0b00100:
               mt->cdr = dmx_channel_number;
               break;
-            case 0b0001:
+            case 0b00010:
               mt->cdr = vector_interrupt_address;
+              break;
+            case 0b00001:
+              mt->cdr = current_status_word2;
               break;
           }
           logmsg("tape %03o setup data register: %s\n", mt->ctrl, drn[mt->cdr]);
           break;
+        case 005:
+          io_setintv(cpu, &mt->intr, mt->va);
+          logmsg("tape %03o set interrupt pending ???\n", mt->ctrl);
+          break;
         case 014:
           mt->dc = G_A(cpu);
-          logmsg("tape %03o setup channel %s addr %04x (%4.4x)\n", mt->ctrl, (mt->dc & MT_DC_DMC) ? "dmc" : "dma", mt->dc & MT_DC_CHA, mt->dc);
+          logmsg("tape %03o setup channel %s addr %04x\n", mt->ctrl, IO_IS_DMA(mt->dc) ? "dma" : "dmc", mt->dc);
           break;
         case 016: // Set interrupt vector
           mt->va = G_A(cpu);
-//        mt->ff = 1;
           logmsg("tape %03o set interrupt vector %04x\n", mt->ctrl, mt->va);
+          break;
+        case 017: // Multi Space
+          mt->ms = G_A(cpu);
+          logmsg("tape %03o set multi space count %04x\n", mt->ctrl, mt->ms);
           break;
         case 003: // Power On
         default:
@@ -390,7 +462,9 @@ if(mt->cdr == current_status_word) mt->pending = 0;
       pthread_mutex_unlock(&mt->pthread.mutex);
       break;
     case IO_TYPE_ASN:
-      if(argc > 0)
+      if(ext >= 4)
+        printf("Invalid unit (%o)\n", ext);
+      else if(argc > 0)
       {
         pthread_mutex_lock(&mt->pthread.mutex);
         if(mt->tm[ext].fn)
@@ -398,6 +472,8 @@ if(mt->cdr == current_status_word) mt->pending = 0;
         mt->tm[ext].fn =  strdup(argv[0]);
         if(argc > 1)
           mt->tm[ext].max = a2i(argv[1]);
+        else
+          mt->tm[ext].max = 0;
         if(mt->ff)
           io_setintv(cpu, &mt->intr, mt->va);
         isfile(mt->tm[ext].fn);

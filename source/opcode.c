@@ -93,9 +93,9 @@ int opcde = ((op[0] & 0b00000011) << 8) | op[1];
 #endif
 
 // ARGT 0000000110000101 (V mode form)
-#if defined V_MODE || defined I_MODE
+//#if defined V_MODE || defined I_MODE
        case 0b0110000101: return E50X(argt)(cpu, op);
-#endif
+//#endif
 
 // CAI  0000000100001001 (S.R, V, I mode form)
        case 0b0100001001: return E50X(cai)(cpu, op);
@@ -230,13 +230,13 @@ int opcde = ((op[0] & 0b00000011) << 8) | op[1];
 // ERMJ 0000000111000001 (000701)
        case 0b0111000001: return E50X(ermj)(cpu,op);
 
-//if defined S_MODE || defined R_MODE
+#if defined S_MODE || defined R_MODE
 // ISI  0000000101001001 (000511)
-//     case 0b0101001001: return E50X(isi)(cpu,op);
+       case 0b0101001001: return E50X(isi)(cpu,op);
 
 // OSI  0000000101001101 (000515)
-//     case 0b0101001101: return E50X(osi)(cpu,op);
-//endif
+       case 0b0101001101: return E50X(osi)(cpu,op);
+#endif
 
 // LMCM 0000000101000001 (S, R, V, I mode form)
        case 0b0101000001: return E50X(lmcm)(cpu, op);
@@ -323,8 +323,10 @@ int opcde = ((op[0] & 0b00000011) << 8) | op[1];
        case 0b0001000101: return E50X(rtn)(cpu, op);
 #endif
 
+#if defined V_MODE
 // RTS  0000000101001001 (V mode form)
        case 0b0101001001: return E50X(rts)(cpu, op);
+#endif
 
 // SCA  0000000000100001 (S, R mode form)
        case 0b0000100001: return E50X(sca)(cpu, op);
@@ -367,10 +369,10 @@ int opcde = ((op[0] & 0b00000011) << 8) | op[1];
        case 0b1011010011:
        case 0b1011011011: return E50X(tfll)(cpu, op);
 
-#if defined V_MODE || defined R_MODE || defined S_MODE
+//#if defined V_MODE || defined R_MODE || defined S_MODE
 // TKA  0000001000000101 (V mode form)
        case 0b1000000101: return E50X(tka)(cpu, op);
-#endif
+//#endif
 
 // TLFL 000000101101 FLR 001 (V mode form)
        case 0b1011010001:
@@ -1483,7 +1485,7 @@ int opcde = ((op[0] & 0b11) << 8) | op[1];
             case 0b1000001: return E50X(brgt)(cpu, op);
 
 // BRGE 001000 R\3 1000101 ADDRESS\16
-            case 0b1000101: return E50X(bhge)(cpu, op);
+            case 0b1000101: return E50X(brge)(cpu, op);
 
 // BRLE 001000 R\3 1000000 ADDRESS\16
             case 0b1000000: return E50X(brle)(cpu, op);
@@ -1647,6 +1649,24 @@ int opcde = op[1] & 0b01111111;
 // LT   011000 R\3 0001111
             case 0b0001111: return E50X(lt)(cpu, op);
 
+// LNE  011000 R\3 0000010
+            case 0b0000010: return E50X(lne)(cpu, op);
+
+// LEQ  011000 R\3 0000011
+            case 0b0000011: return E50X(leq)(cpu, op);
+
+// LGE  011000 R\3 0000100
+// LHGE     case 0b0000100: return E50X(lge)(cpu, op);
+
+// LGT  011000 R\3 0000101
+            case 0b0000101: return E50X(lgt)(cpu, op);
+
+// LLE  011000 R\3 0000001
+            case 0b0000001: return E50X(lle)(cpu, op);
+
+// LLT  011000 R\3 0000000
+// LHLT     case 0b0000000: return E50X(llt)(cpu, op);
+
 // LCEQ 011000 R\3 1101011
             case 0b1101011: return E50X(lceq)(cpu, op);
 
@@ -1787,6 +1807,9 @@ int opcde = op[1] & 0b01111111;
 
 // SSP  011000 R\3 0100011
             case 0b0100011: return E50X(ssp)(cpu, op);
+
+// STEX 011000 R\3 0010111
+            case 0b0010111: return E50X(stex)(cpu, op);
 
 // TC   011000 R\3 0100110
             case 0b0100110: return E50X(tc)(cpu, op);

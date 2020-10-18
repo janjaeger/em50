@@ -90,14 +90,14 @@ __sync_synchronize();
     pxm_intrchk(cpu, v);
   else
   {
-    if(cpu->crs->km.vim)
-      S_RB(cpu, v);
-    else
-    {
-      uint16_t irc = E50X(vfetch_w)(cpu, 063);
-      S_RB(cpu, irc + 1);
-      E50X(vstore_wx)(cpu, irc, cpu->p, acc_wr);
-    }
+    cpu->crs->km.ie = 0;
+//  if(!cpu->crs->km.vim)
+//    io_clrai(cpu);
+    uint16_t irc = E50X(vfetch_w)(cpu, cpu->crs->km.vim ? v : 063);
+    if(!irc)
+      longjmp(cpu->smode, smode_halt);
+    E50X(vstore_wx)(cpu, irc, cpu->p, acc_wr);
+    S_RB(cpu, intraseg_i(irc, 1));
   }
 
   longjmp(cpu->endop, endop_nointr5); // FIXME TODO CHECK
@@ -119,6 +119,8 @@ ATOFF(cpu);
   else
   {
     uint16_t ea = E50X(vfetch_w)(cpu, cpu->fault.offset);
+    if(!ea)
+      longjmp(cpu->smode, smode_halt);
     S_RB(cpu, ea + 1);
     E50X(vstore_wx)(cpu, ea, cpu->fault.pc & 0xffff, acc_wr);
 
@@ -143,7 +145,7 @@ void E50X(run_cpu)(cpu_t *cpu)
 {
   do {
     endop_t code = setjmp(cpu->endop);
-cpu->exec = 0;
+    cpu->exec = 0;
     do {
       if(!cpu_started(cpu))
         code = E50X(run_cpu_status)(cpu, code);
@@ -152,20 +154,20 @@ cpu->exec = 0;
       case endop_fault:
         E50X(run_cpu_fault)(cpu);
       default:
-      case endop_intrchk:
-//      E50X(timer_get)(cpu); // ABORT CHECK
-        if(io_pending(cpu) && cpu->crs->km.ie)
-          E50X(run_cpu_intrchk)(cpu);
-        for(int n = 0; n < 32; ++n)
-          E50X(exec_inst)(cpu);
       case endop_nointr5:
-      case endop_setjmp:
         E50X(exec_inst)(cpu);
         E50X(exec_inst)(cpu);
         E50X(exec_inst)(cpu);
         E50X(exec_inst)(cpu);
       case endop_nointr1:
         E50X(exec_inst)(cpu);
+      case endop_intrchk:
+//      E50X(timer_get)(cpu); // ABORT CHECK
+        if(io_pending(cpu) && cpu->crs->km.ie)
+          E50X(run_cpu_intrchk)(cpu);
+      case endop_setjmp:
+        for(int n = 0; n < 32; ++n)
+          E50X(exec_inst)(cpu);
       }
       code = endop_run;
     } while(1);

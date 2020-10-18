@@ -44,7 +44,7 @@ extern void e64v_run_cpu(cpu_t *);
 static inline void cpu_reset(cpu_t *cpu)
 {
   memset(&(cpu->srf), 0, sizeof(cpu->srf));
-  memset(cpu->iotlb.i, 0xff, sizeof(cpu->iotlb.i));
+  mm_ptlb(cpu);
   cpu->crn = 0;
   cpu->crs = &cpu->srf.urs[0];
   cpu->crs->timer = 0 - em50_timer();

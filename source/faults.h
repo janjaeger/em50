@@ -60,7 +60,7 @@ static inline void __attribute__ ((noreturn)) E50X(rxm_fault)(cpu_t *cpu)
 {
   cpu->fault.pc     = cpu->po;
   cpu->fault.ring   = cpu->po & ea_r;
-  cpu->fault.faddr  = 0; // EFFECTIVE ADDR
+  cpu->fault.faddr  = 0;
   cpu->fault.vector = (cpu->fault.ring >> 28) + offsetin(pcb_t, fault[0]);
   cpu->fault.vecoff = 000;
   cpu->fault.km     = cpu->crs->km;
@@ -194,8 +194,8 @@ static inline void __attribute__ ((noreturn)) E50X(access_fault)(cpu_t *cpu, uin
 
 static inline void __attribute__ ((noreturn)) E50X(arith_fault)(cpu_t *cpu, uint16_t code, uint32_t addr)
 {
-  cpu->fault.pc     = cpu->po;
-  cpu->fault.ring   = cpu->po & ea_r;
+  cpu->fault.pc     = cpu->pb;
+  cpu->fault.ring   = cpu->pb & ea_r;
 #if defined V_MODE || defined I_MODE
   cpu->fault.faddr  = addr;
 #else

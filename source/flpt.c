@@ -51,6 +51,49 @@
 #endif
 
 
+static inline FLOAT E50X(g_qac)(cpu_t *cpu)
+{
+  em50_qad qad;
+
+  qad.dbl.q = G_DAC(cpu, 1);
+  qad.qex.q = G_DAC(cpu, 0);
+
+#ifdef FLOAT128
+  return to_qad(qad.q);
+#else
+  return to_dbl(qad.dbl.q);
+#endif
+}
+
+static inline FLOAT E50X(g_qac_s)(cpu_t *cpu, uint32_t ea)
+{
+  em50_qad qad;
+
+  qad.dbl.q = E50X(vfetch_q)(cpu, ea);
+  qad.qex.q = E50X(vfetch_q)(cpu, intraseg_i(ea, 4));
+
+#ifdef FLOAT128
+  return to_qad(qad.q);
+#else
+  return to_dbl(qad.dbl.q);
+#endif
+}
+
+static inline void E50X(s_qac)(cpu_t *cpu, FLOAT fl)
+{
+  em50_qad qad;
+
+#ifdef FLOAT128
+  qad.q = from_qad(fl);
+#else
+  qad.dbl.q = from_dbl(fl);
+  qad.qex.q = 0;
+#endif
+
+  S_DAC(cpu, 1, qad.dbl.q);
+  S_DAC(cpu, 0, qad.qex.q);
+}
+
 #if defined R_MODE || defined V_MODE || defined I_MODE
 /* BFEQ
  * Branch on Floating Point Accumulator Equal to 0
@@ -58,24 +101,22 @@
  */
 E50I(bfeq)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "*bfeq", ea);
 
 #if defined I_MODE
   int f = FAC(op);
 #else
-  int f = 1;
+  const int f = 1;
 #endif
 
-  double dac = to_dbl(G_DAC(cpu, f));
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
   SET_CC(cpu, dac);
 
   if(CC_EQ(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 
 
@@ -84,24 +125,22 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
  */
 E50I(bfge)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "*bfge", ea);
 
 #if defined I_MODE
   int f = FAC(op);
 #else
-  int f = 1;
+  const int f = 1;
 #endif
 
-  double dac = to_dbl(G_DAC(cpu, f));
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
   SET_CC(cpu, dac);
 
   if(CC_GE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 
 
@@ -111,24 +150,22 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
  */
 E50I(bfgt)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "*bfgt", ea);
 
 #if defined I_MODE
   int f = FAC(op);
 #else
-  int f = 1;
+  const int f = 1;
 #endif
 
-  double dac = to_dbl(G_DAC(cpu, f));
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
   SET_CC(cpu, dac);
 
   if(CC_GT(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 
 
@@ -138,24 +175,22 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
  */
 E50I(bfle)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "*bfle", ea);
 
 #if defined I_MODE
   int f = FAC(op);
 #else
-  int f = 1;
+  const int f = 1;
 #endif
 
-  double dac = to_dbl(G_DAC(cpu, f));
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
   SET_CC(cpu, dac);
 
   if(CC_LE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 
 
@@ -165,24 +200,22 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
  */
 E50I(bflt)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "*bflt", ea);
 
 #if defined I_MODE
   int f = FAC(op);
 #else
-  int f = 1;
+  const int f = 1;
 #endif
 
-  double dac = to_dbl(G_DAC(cpu, f));
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
   SET_CC(cpu, dac);
 
   if(CC_LT(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 
 
@@ -192,24 +225,22 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
  */
 E50I(bfne)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "*bfne", ea);
 
 #if defined I_MODE
   int f = FAC(op);
 #else
-  int f = 1;
+  const int f = 1;
 #endif
 
-  double dac = to_dbl(G_DAC(cpu, f));
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
   SET_CC(cpu, dac);
 
   if(CC_NE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 
 
@@ -217,7 +248,13 @@ E50I(lfeq)
 {
   logop1(op, "*lfeq");
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+#if defined I_MODE
+  int f = IFAC(op);
+#else
+  const int f = 1;
+#endif
+
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
   SET_CC(cpu, dac);
 
@@ -227,6 +264,7 @@ E50I(lfeq)
 #else
   S_A(cpu, CC_EQ(cpu) ? 1 : 0);
 #endif
+  logdac(cpu, "lfeq", f);
 }
 
 
@@ -234,7 +272,13 @@ E50I(lfge)
 {
   logop1(op, "*lfge");
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+#if defined I_MODE
+  int f = IFAC(op);
+#else
+  const int f = 1;
+#endif
+
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
   SET_CC(cpu, dac);
 
@@ -244,6 +288,7 @@ E50I(lfge)
 #else
   S_A(cpu, CC_GE(cpu) ? 1 : 0);
 #endif
+  logdac(cpu, "lfge", f);
 }
 
 
@@ -251,7 +296,13 @@ E50I(lfgt)
 {
   logop1(op, "*lfgt");
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+#if defined I_MODE
+  int f = IFAC(op);
+#else
+  const int f = 1;
+#endif
+
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
   SET_CC(cpu, dac);
 
@@ -261,6 +312,7 @@ E50I(lfgt)
 #else
   S_A(cpu, CC_GT(cpu) ? 1 : 0);
 #endif
+  logdac(cpu, "lfgt", f);
 }
 
 
@@ -268,7 +320,13 @@ E50I(lfle)
 {
   logop1(op, "*lfle");
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+#if defined I_MODE
+  int f = IFAC(op);
+#else
+  const int f = 1;
+#endif
+
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
   SET_CC(cpu, dac);
 
@@ -278,6 +336,7 @@ E50I(lfle)
 #else
   S_A(cpu, CC_LE(cpu) ? 1 : 0);
 #endif
+  logdac(cpu, "lfle", f);
 }
 
 
@@ -285,7 +344,13 @@ E50I(lflt)
 {
   logop1(op, "*lflt");
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+#if defined I_MODE
+  int f = IFAC(op);
+#else
+  const int f = 1;
+#endif
+
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
   SET_CC(cpu, dac);
 
@@ -295,6 +360,7 @@ E50I(lflt)
 #else
   S_A(cpu, CC_LT(cpu) ? 1 : 0);
 #endif
+  logdac(cpu, "lflt", f);
 }
 
 
@@ -302,7 +368,13 @@ E50I(lfne)
 {
   logop1(op, "*lfne");
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+#if defined I_MODE
+  int f = IFAC(op);
+#else
+  const int f = 1;
+#endif
+
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
   SET_CC(cpu, dac);
 
@@ -312,6 +384,7 @@ E50I(lfne)
 #else
   S_A(cpu, CC_NE(cpu) ? 1 : 0);
 #endif
+  logdac(cpu, "lfne", f);
 }
 #endif
 
@@ -321,7 +394,7 @@ E50I(fsgt)
 {
   logop1(op, "*fsgt");
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
 
   if(dac > 0)
     ++cpu->p;
@@ -334,7 +407,7 @@ E50I(fsle)
 {
   logop1(op, "*fsle");
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
 
   if(dac <= 0)
     ++cpu->p;
@@ -347,7 +420,7 @@ E50I(fsmi)
 {
   logop1(op, "*fsmi");
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
 
   if(dac < 0)
     ++cpu->p;
@@ -360,7 +433,7 @@ E50I(fsnz)
 {
   logop1(op, "*fsnz");
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
 
   if(dac != 0)
     ++cpu->p;
@@ -373,7 +446,7 @@ E50I(fspl)
 {
   logop1(op, "*fspl");
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
 
   if(dac >= 0)
     ++cpu->p;
@@ -386,7 +459,7 @@ E50I(fsze)
 {
   logop1(op, "*fsze");
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
 
   if(dac == 0)
     ++cpu->p;
@@ -503,7 +576,7 @@ E50I(flta)
 
   int16_t a = G_A(cpu);
 
-  double d = a;
+  FLOAT d = a;
 
   S_DAC(cpu, 1, from_dbl_rnd(d));
 
@@ -518,7 +591,7 @@ E50I(flot)
   int32_t l = G_L(cpu);
   l = to31(l);
 
-  double d = l;
+  FLOAT d = l;
 
   S_DAC(cpu, 1, from_dbl_rnd(d));
 
@@ -532,7 +605,7 @@ E50I(fltl)
 
   int32_t l = G_L(cpu);
 
-  double d = l;
+  FLOAT d = l;
 
   S_DAC(cpu, 1, from_dbl_rnd(d));
 
@@ -555,7 +628,7 @@ E50I(fcdq)
 {
   logop1(op, "*fcdq");
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
   
   if(dac == 0)
     S_DAC(cpu, 1, 0);
@@ -571,7 +644,7 @@ E50I(int)
 {
   logop1(op, "*int");
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
 
   int32_t l = dac;
 
@@ -589,7 +662,7 @@ E50I(inta)
 {
   logop1(op, "*inta");
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
 
   int16_t a = dac;
 
@@ -605,7 +678,7 @@ E50I(intl)
 {
   logop1(op, "*intl");
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
 
   int32_t l = dac;
 
@@ -627,7 +700,7 @@ E50I(fcm)
   int f = 1;
 #endif
 
-  double dac = to_dbl(G_DAC(cpu, f));
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
   dac = -dac;
 
@@ -649,7 +722,7 @@ E50I(dfcm)
   int f = 1;
 #endif
 
-  double dac = to_dbl(G_DAC(cpu, f));
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
   dac = -dac;
 
@@ -667,9 +740,9 @@ uint32_t ea = E50X(ea)(cpu, op);
 
   logop2o(op, "*dfcs", ea);
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
 
-  double d = to_dbl(E50X(vfetch_q)(cpu, ea));
+  FLOAT d = to_dbl(E50X(vfetch_q)(cpu, ea));
 
   _SET_CC(cpu, dac, d);
 
@@ -689,9 +762,9 @@ uint32_t ea = E50X(ea)(cpu, op);
 
   logop2o(op, "*fcs", ea);
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
 
-  double d = fto_dbl(E50X(vfetch_d)(cpu, ea));
+  FLOAT d = fto_dbl(E50X(vfetch_d)(cpu, ea));
 
   _SET_CC(cpu, dac, d);
 
@@ -709,13 +782,13 @@ uint32_t ea = E50X(ea)(cpu, op);
 
   logop2o(op, "*fdv", ea);
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
 
-  double d = fto_dbl(E50X(vfetch_d)(cpu, ea));
+  FLOAT d = fto_dbl(E50X(vfetch_d)(cpu, ea));
 
-logmsg("-> fdv %e * %e", dac, d);
+logmsg("-> fdv %e * %e", (double)dac, (double)d);
   dac /= d;
-logmsg(" = %e\n", dac);
+logmsg(" = %e\n", (double)dac);
 
   S_DAC(cpu, 1, from_dbl_rnd(dac));
 
@@ -731,13 +804,13 @@ uint32_t ea = E50X(ea)(cpu, op);
 
   logop2o(op, "*fmp", ea);
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
 
-  double d = fto_dbl(E50X(vfetch_d)(cpu, ea));
+  FLOAT d = fto_dbl(E50X(vfetch_d)(cpu, ea));
 
-logmsg("-> fmp %e * %e", dac, d);
+logmsg("-> fmp %e * %e", (double)dac, (double)d);
   dac *= d;
-logmsg(" = %e\n", dac);
+logmsg(" = %e\n", (double)dac);
 
   S_DAC(cpu, 1, from_dbl_rnd(dac));
 
@@ -753,13 +826,13 @@ uint32_t ea = E50X(ea)(cpu, op);
 
   logop2o(op, "*dfmp", ea);
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
 
-  double d = to_dbl(E50X(vfetch_q)(cpu, ea));
+  FLOAT d = to_dbl(E50X(vfetch_q)(cpu, ea));
 
-logmsg("-> dfmp %e * %e", dac, d);
+logmsg("-> dfmp %e * %e", (double)dac, (double)d);
   dac *= d;
-logmsg(" = %e\n", dac);
+logmsg(" = %e\n", (double)dac);
 
   S_DAC(cpu, 1, from_dbl_rnd(dac));
 
@@ -775,13 +848,13 @@ uint32_t ea = E50X(ea)(cpu, op);
 
   logop2o(op, "*dfdv", ea);
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
 
-  double d = to_dbl(E50X(vfetch_q)(cpu, ea));
+  FLOAT d = to_dbl(E50X(vfetch_q)(cpu, ea));
 
-logmsg("-> dfdv %e / %e", dac, d);
+logmsg("-> dfdv %e / %e", (double)dac, (double)d);
   dac /= d;
-logmsg(" = %e\n", dac);
+logmsg(" = %e\n", (double)dac);
 
   S_DAC(cpu, 1, from_dbl_rnd(dac));
 
@@ -797,13 +870,13 @@ uint32_t ea = E50X(ea)(cpu, op);
 
   logop2o(op, "*fad", ea);
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
 
-  double d = fto_dbl(E50X(vfetch_d)(cpu, ea));
+  FLOAT d = fto_dbl(E50X(vfetch_d)(cpu, ea));
 
-logmsg("-> fad %e + %e", dac, d);
+logmsg("-> fad %e + %e", (double)dac, (double)d);
   dac += d;
-logmsg(" = %e\n", dac);
+logmsg(" = %e\n", (double)dac);
 
   S_DAC(cpu, 1, from_dbl_rnd(dac));
 
@@ -819,13 +892,13 @@ uint32_t ea = E50X(ea)(cpu, op);
 
   logop2o(op, "*dfad", ea);
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
 
-  double d = to_dbl(E50X(vfetch_q)(cpu, ea));
+  FLOAT d = to_dbl(E50X(vfetch_q)(cpu, ea));
 
-logmsg("-> dfad %e + %e", dac, d);
+logmsg("-> dfad %e + %e", (double)dac, (double)d);
   dac += d;
-logmsg(" = %e\n", dac);
+logmsg(" = %e\n", (double)dac);
 
   S_DAC(cpu, 1, from_dbl_rnd(dac));
 
@@ -841,13 +914,13 @@ uint32_t ea = E50X(ea)(cpu, op);
 
   logop2o(op, "*fsb", ea);
 
-  double fac = fto_dbl(G_FAC(cpu, 1));
+  FLOAT fac = fto_dbl(G_FAC(cpu, 1));
 
-  double d = fto_dbl(E50X(vfetch_d)(cpu, ea));
+  FLOAT d = fto_dbl(E50X(vfetch_d)(cpu, ea));
 
-logmsg("-> fsb %e - %e", fac, d);
+logmsg("-> fsb %e - %e", (double)fac, (double)d);
   fac -= d;
-logmsg(" = %e\n", fac);
+logmsg(" = %e\n", (double)fac);
 
   S_FAC(cpu, 1, ffrom_dbl_rnd(fac));
 
@@ -863,13 +936,13 @@ uint32_t ea = E50X(ea)(cpu, op);
 
   logop2o(op, "*dfsb", ea);
 
-  double dac = to_dbl(G_DAC(cpu, 1));
+  FLOAT dac = to_dbl(G_DAC(cpu, 1));
 
-  double d = to_dbl(E50X(vfetch_q)(cpu, ea));
+  FLOAT d = to_dbl(E50X(vfetch_q)(cpu, ea));
 
-logmsg("-> dfsb %e - %e", dac, d);
+logmsg("-> dfsb %e - %e", (double)dac, (double)d);
   dac -= d;
-logmsg(" = %e\n", dac);
+logmsg(" = %e\n", (double)dac);
 
   S_DAC(cpu, 1, from_dbl_rnd(dac));
 
@@ -1008,7 +1081,7 @@ int f = FAC(op);
 
   logop2o(op, "*fa", f);
 
-  double fac = to_dbl(G_DAC(cpu, f));
+  FLOAT fac = to_dbl(G_DAC(cpu, f));
 
   fac += fto_dbl(E50X(efetch_d)(cpu, op));
 
@@ -1026,7 +1099,7 @@ int f = FAC(op);
 
   logop2o(op, "*dfa", f);
 
-  double dac = to_dbl(G_DAC(cpu, f));
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
   dac += to_dbl(E50X(efetch_q)(cpu, op));
 
@@ -1044,7 +1117,7 @@ int f = FAC(op);
 
   logop2o(op, "dfs", f);
 
-  double fac = to_dbl(G_DAC(cpu, f));
+  FLOAT fac = to_dbl(G_DAC(cpu, f));
 
   fac -= fto_dbl(E50X(efetch_d)(cpu, op));
 
@@ -1062,7 +1135,7 @@ int f = FAC(op);
 
   logop2o(op, "*dfs", f);
 
-  double dac = to_dbl(G_DAC(cpu, f));
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
   dac -= to_dbl(E50X(efetch_q)(cpu, op));
 
@@ -1080,7 +1153,7 @@ int f = FAC(op);
 
   logop2o(op, "*fm", f);
 
-  double fac = to_dbl(G_DAC(cpu, f));
+  FLOAT fac = to_dbl(G_DAC(cpu, f));
 
   fac *= fto_dbl(E50X(efetch_d)(cpu, op));
 
@@ -1098,7 +1171,7 @@ int f = FAC(op);
 
   logop2o(op, "*dfm", f);
 
-  double dac = to_dbl(G_DAC(cpu, f));
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
   dac *= to_dbl(E50X(efetch_q)(cpu, op));
 
@@ -1116,7 +1189,7 @@ int f = FAC(op);
 
   logop2o(op, "*fd", f);
 
-  double fac = to_dbl(G_DAC(cpu, f));
+  FLOAT fac = to_dbl(G_DAC(cpu, f));
 
   fac /= fto_dbl(E50X(efetch_d)(cpu, op));
 
@@ -1134,7 +1207,7 @@ int f = FAC(op);
 
   logop2o(op, "*dfd", f);
 
-  double dac = to_dbl(G_DAC(cpu, f));
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
   dac /= to_dbl(E50X(efetch_q)(cpu, op));
 
@@ -1152,9 +1225,9 @@ int f = FAC(op);
 
   logop2o(op, "*fc", f);
 
-  double fac = fto_dbl(G_FAC(cpu, f));
+  FLOAT fac = fto_dbl(G_FAC(cpu, f));
 
-  double d = fto_dbl(E50X(efetch_d)(cpu, op));
+  FLOAT d = fto_dbl(E50X(efetch_d)(cpu, op));
 
   _SET_CC(cpu, fac, d);
 
@@ -1168,9 +1241,9 @@ int f = FAC(op);
 
   logop2o(op, "*dfc", f);
 
-  double dac = to_dbl(G_DAC(cpu, f));
+  FLOAT dac = to_dbl(G_DAC(cpu, f));
 
-  double d = to_dbl(E50X(efetch_q)(cpu, op));
+  FLOAT d = to_dbl(E50X(efetch_q)(cpu, op));
 
   _SET_CC(cpu, dac, d);
 
@@ -1199,7 +1272,7 @@ int f = FAR(op);
 
   int32_t a = G_R(cpu, dr);
 
-  double d = a;
+  FLOAT d = a;
 
   S_DAC(cpu, f, from_dbl_rnd(d));
 
@@ -1216,7 +1289,7 @@ int f = FAR(op);
 
   int16_t r = G_RH(cpu, dr);
 
-  double d = r;
+  FLOAT d = r;
 
   S_DAC(cpu, f, from_dbl_rnd(d));
 
@@ -1231,7 +1304,7 @@ int f = FAR(op);
 
   logop1oo(op, "*int", dr, f);
 
-  double d = to_dbl(G_DAC(cpu, f));
+  FLOAT d = to_dbl(G_DAC(cpu, f));
 
   int32_t r = d;
 
@@ -1250,7 +1323,7 @@ int f = FAR(op);
 
   logop1oo(op, "*inth", dr, f);
 
-  double d = to_dbl(G_DAC(cpu, f));
+  FLOAT d = to_dbl(G_DAC(cpu, f));
 
   int16_t r = d;
 
@@ -1268,7 +1341,7 @@ static inline void E50X(_qfld)(cpu_t *cpu, op_t op, uint32_t ea)
   logop2o(op, "*qfld", ea);
 
   uint64_t dac1 = E50X(vfetch_q)(cpu, ea);
-  uint64_t dac0 = E50X(vfetch_q)(cpu, ea + 4);
+  uint64_t dac0 = E50X(vfetch_q)(cpu, intraseg_i(ea, 4));
 
   S_DAC(cpu, 1, dac1);
   S_DAC(cpu, 0, dac0);
@@ -1284,7 +1357,7 @@ static inline void E50X(_qfst)(cpu_t *cpu, op_t op, uint32_t ea)
   uint64_t dac0 = G_DAC(cpu, 0);
 
   E50X(vstore_q)(cpu, ea, dac1);
-  E50X(vstore_q)(cpu, ea + 4, dac0);
+  E50X(vstore_q)(cpu, intraseg_i(ea, 4), dac0);
 
   logdac(cpu, "qfst", 1);
 }
@@ -1293,20 +1366,14 @@ static inline void E50X(_qfad)(cpu_t *cpu, op_t op, uint32_t ea)
 {
   logop2o(op, "*qfad", ea);
 
-  double dac = to_dbl(G_DAC(cpu, 1));
-  ins_qex(&dac, G_DAC(cpu, 0));
+  FLOAT dac = E50X(g_qac)(cpu);
+  FLOAT d = E50X(g_qac_s)(cpu, ea);
 
-  uint64_t d1 = E50X(vfetch_q)(cpu, ea);
-  uint64_t d0 = E50X(vfetch_q)(cpu, ea + 4);
-  double d = to_dbl(d1);
-  ins_qex(&d, d0);
-
-logmsg("-> qfad %e + %e", dac, d);
+logmsg("-> qfad %e + %e", (double)dac, (double)d);
   dac += d;
-logmsg(" = %e\n", dac);
+logmsg(" = %e\n", (double)dac);
 
-  S_DAC(cpu, 1, from_dbl(dac));
-  S_DAC(cpu, 0, qex_dbl(dac));
+  E50X(s_qac)(cpu, dac);
 
   cpu->crs->km.cbit = 0;
 
@@ -1317,20 +1384,14 @@ static inline void E50X(_qfsb)(cpu_t *cpu, op_t op, uint32_t ea)
 {
   logop2o(op, "*qfsb", ea);
 
-  double dac = to_dbl(G_DAC(cpu, 1));
-  ins_qex(&dac, G_DAC(cpu, 0));
+  FLOAT dac = E50X(g_qac)(cpu);
+  FLOAT d = E50X(g_qac_s)(cpu, ea);
 
-  uint64_t d1 = E50X(vfetch_q)(cpu, ea);
-  uint64_t d0 = E50X(vfetch_q)(cpu, ea + 4);
-  double d = to_dbl(d1);
-  ins_qex(&d, d0);
-
-logmsg("-> qfsb %e - %e", dac, d);
+logmsg("-> qfsb %e - %e", (double)dac, (double)d);
   dac -= d;
-logmsg(" = %e\n", dac);
+logmsg(" = %e\n", (double)dac);
 
-  S_DAC(cpu, 1, from_dbl(dac));
-  S_DAC(cpu, 0, qex_dbl(dac));
+  E50X(s_qac)(cpu, dac);
 
   cpu->crs->km.cbit = 0;
 
@@ -1341,20 +1402,14 @@ static inline void E50X(_qfmp)(cpu_t *cpu, op_t op, uint32_t ea)
 {
   logop2o(op, "*qfmp", ea);
 
-  double dac = to_dbl(G_DAC(cpu, 1));
-  ins_qex(&dac, G_DAC(cpu, 0));
+  FLOAT dac = E50X(g_qac)(cpu);
+  FLOAT d = E50X(g_qac_s)(cpu, ea);
 
-  uint64_t d1 = E50X(vfetch_q)(cpu, ea);
-  uint64_t d0 = E50X(vfetch_q)(cpu, ea + 4);
-  double d = to_dbl(d1);
-  ins_qex(&d, d0);
-
-logmsg("-> qfmp %e * %e", dac, d);
+logmsg("-> qfmp %e * %e", (double)dac, (double)d);
   dac *= d;
-logmsg(" = %e\n", dac);
+logmsg(" = %e\n", (double)dac);
 
-  S_DAC(cpu, 1, from_dbl(dac));
-  S_DAC(cpu, 0, qex_dbl(dac));
+  E50X(s_qac)(cpu, dac);
 
   cpu->crs->km.cbit = 0;
 
@@ -1365,20 +1420,12 @@ static inline void E50X(_qfdv)(cpu_t *cpu, op_t op, uint32_t ea)
 {
   logop2o(op, "*qfdv", ea);
 
-  double dac = to_dbl(G_DAC(cpu, 1));
-  ins_qex(&dac, G_DAC(cpu, 0));
+  FLOAT qac = E50X(g_qac)(cpu);
+  FLOAT qdl = E50X(g_qac_s)(cpu, ea);
 
-  uint64_t d1 = E50X(vfetch_q)(cpu, ea);
-  uint64_t d0 = E50X(vfetch_q)(cpu, ea + 4);
-  double d = to_dbl(d1);
-  ins_qex(&d, d0);
+  qac /= qdl;
 
-logmsg("-> qfdv %e / %e", dac, d);
-  dac /= d;
-logmsg(" = %e\n", dac);
-
-  S_DAC(cpu, 1, from_dbl(dac));
-  S_DAC(cpu, 0, qex_dbl(dac));
+  E50X(s_qac)(cpu, qac);
 
   cpu->crs->km.cbit = 0;
 
@@ -1389,13 +1436,8 @@ static inline void E50X(_qfcs)(cpu_t *cpu, op_t op, uint32_t ea)
 {
   logop2o(op, "*qfcs", ea);
 
-  double dac = to_dbl(G_DAC(cpu, 1));
-  ins_qex(&dac, G_DAC(cpu, 0));
-
-  uint64_t d1 = E50X(vfetch_q)(cpu, ea);
-  uint64_t d0 = E50X(vfetch_q)(cpu, ea + 4);
-  double d = to_dbl(d1);
-  ins_qex(&d, d0);
+  FLOAT dac = E50X(g_qac)(cpu);
+  FLOAT d = E50X(g_qac_s)(cpu, ea);
 
   _SET_CC(cpu, dac, d);
 
@@ -1412,22 +1454,22 @@ static inline void E50X(_qfcs)(cpu_t *cpu, op_t op, uint32_t ea)
 E50I(qfxx)
 {
 uint32_t ea = E50X(ea)(cpu, op);
-uint16_t ext = E50X(vfetch_iw)(cpu); // BIG ENDIAN
+uint16_t ext = E50X(vfetch_iw)(cpu);
 
   switch(ext) {
-    case 0x0000:
+    case 0x00:
       return E50X(_qfld)(cpu, op, ea);
-    case 0x0100:
+    case 0x01:
       return E50X(_qfst)(cpu, op, ea);
-    case 0x0200:
+    case 0x02:
       return E50X(_qfad)(cpu, op, ea);
-    case 0x0300:
+    case 0x03:
       return E50X(_qfsb)(cpu, op, ea);
-    case 0x0400:
+    case 0x04:
       return E50X(_qfmp)(cpu, op, ea);
-    case 0x0500:
+    case 0x05:
       return E50X(_qfdv)(cpu, op, ea);
-    case 0x0600:
+    case 0x06:
       return E50X(_qfcs)(cpu, op, ea);
     default:
       return E50X(uii_fault)(cpu, ea);
@@ -1498,13 +1540,11 @@ E50I(qfcm)
 {
   logop1(op, "*qfcm");
 
-  double dac = to_dbl(G_DAC(cpu, 1));
-  ins_qex(&dac, G_DAC(cpu, 0));
+  FLOAT dac = E50X(g_qac)(cpu);
 
   dac = -dac;
 
-  S_DAC(cpu, 1, from_dbl(dac));
-  S_DAC(cpu, 0, qex_dbl(dac));
+  E50X(s_qac)(cpu, dac);
 
   cpu->crs->km.cbit = 0;
 

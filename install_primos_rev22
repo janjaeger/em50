@@ -8,6 +8,7 @@ set timeout -1
 
 spawn em50
 expect "CP> ";                         send -- "ASSIGN MT0 primos_22.1.4/primos_22.1.4_1of3.tap\r"
+expect "CP> ";                         send -- "ASSIGN 026:0 * MODEL_4860\r"
 
 expect "CP> ";                         send -- "BOOT 10005\r"
 expect "RUN FILE TREENAME=";           send -- "MAKE.SAVE\r"
@@ -108,6 +109,7 @@ expect "INPUT\r"; sleep 1
   send -- "OPR 0\r"
 # send -- "START_DSM\r"
 # send -- "START_TALK_SERVER\r"
+  send -- "CAB -LINE 0 -IBS 4096 -OBS 4096 -DMQS 255 -TO 31\r"
   send -- "MAX ALL\r"
   send -- "CO -END\r\r"
 expect "EDIT\r"; sleep 1;              send -- "FILE PRIMOS.COMI\r"

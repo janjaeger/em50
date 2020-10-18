@@ -66,6 +66,11 @@ static void sc_init(cpu_t *cpu, int type, int ext, int func, int ctrl, sc_t **sc
 //char tname[16];
 //snprintf(tname, sizeof(tname), "sysc %03o", (*sc)->ctrl);
 //pthread_setname_np(cpu->sys->tid, tname);
+//sigset_t set;
+//sigemptyset(&set);
+//sigaddset(&set, SIGINT);
+//sigaddset(&set, SIGTSTP);
+//pthread_sigmask(SIG_BLOCK, &set, NULL);
 }
 
 
@@ -110,6 +115,13 @@ static inline uint16_t sysc_bclock_read(cpu_t *cpu)
 }
 
 
+static int sysc_poll(sc_t *sc)
+{
+  struct pollfd pfd = {.fd = sc->kb[0], .events = POLLIN};
+  return poll(&pfd, 1, 0);
+}
+
+
 static int sysc_read(sc_t *sc)
 {
   char c;
@@ -123,22 +135,30 @@ static int sysc_write(sc_t *sc, char c)
 }
 
 
-static int sysc_in(cpu_t *cpu, char c)
+static int sysc_out(sc_t *sc)
 {
-sc_t *sc = cpu->sc;
+  char c;
+  return read(sc->pr[0], &c, 1) == 1 ? c : EOF;
+}
 
+
+static int sysc_in(sc_t *sc, char c)
+{
+  if(sc->im)
+    io_setintv(sc->cpu, &sc->ri, sc->rv);
   return write(sc->kb[1], &c, 1) == 1 ? c : EOF;
 }
 
 
 void sysc_input(cpu_t *cpu, char *s)
 {
+sc_t *sc = cpu->sc;
 char c = '\0';
 
   while(s && *s)
   {
     if(*s != '\\' && c != '\\')
-      sysc_in(cpu, *s);
+      sysc_in(sc, *s);
     else
     {
       if(c != '\\')
@@ -147,14 +167,14 @@ char c = '\0';
         switch(*s)
         {
           case 'n':
-            sysc_in(cpu, '\n');
+            sysc_in(sc, '\n');
             break;
           case '\\':
-            sysc_in(cpu, '\\');
+            sysc_in(sc, '\\');
             break;
           default:
-            sysc_in(cpu, c);
-            sysc_in(cpu, *s);
+            sysc_in(sc, c);
+            sysc_in(sc, *s);
         }
     }
     ++s;
@@ -195,7 +215,7 @@ sc_t *sc = cpu->sc;
     {
       if(esc)
       {
-        write(sc->kb[1], &esc, 1);
+        sysc_in(sc, esc);
         esc = '\0';
       }
     }
@@ -214,20 +234,20 @@ sc_t *sc = cpu->sc;
         else
         {
           if(esc)
-            write(sc->kb[1], &esc, 1);
+            sysc_in(sc, esc);
           esc = '\0';
-          write(sc->kb[1], &c, 1);
+          sysc_in(sc, c);
         }
       }
       if(FD_ISSET(sc->pr[0], &fs))
       {
-        read(sc->pr[0], &c, 1);
+        c = sysc_out(sc);
         write(STDOUT_FILENO, &c, 1);
       }
     }
   } while(cpu->halt.status == started || count > 0);
 
-  while(read(sc->pr[0], &c, 1) > 0)
+  while((c = sysc_out(sc) > 0))
     write(STDOUT_FILENO, &c, 1);
 
   tcsetattr(0, TCSANOW, &orig);
@@ -243,7 +263,9 @@ sc_t *sc = *devparm;
     case IO_TYPE_OCP:
       switch(func) {
 //      case 000: // Initialize Echoplex Input
-//      case 001: // Initialize Echoplex Output
+        case 001: // Initialize Echoplex Output
+          logmsg("sysc %03o Initialize Echoplex Output\n", sc->ctrl);
+          break;
 //      case 002: // Set Receive Interrupt Mask
 //      case 003: // Enable Receive DMA/C
 //      case 004: // Reset Receive Interrupt Mask and Transmit DMA/C
@@ -261,9 +283,23 @@ sc_t *sc = *devparm;
           break;
 //      case 013: // Set Diagnostic Mode
 //      case 014: // SLC only: Set Search for Sync Mode
-//      case 015: // Set Interrupt Mask
+        case 015: // Set Interrupt Mask
+          logmsg("sysc %03o Set Interrupt Mask\n", sc->ctrl);
+	  sc->im = 1;
+	  if(sysc_poll(sc))
+            io_setintv(cpu, &sc->ri, sc->rv);
+          break;
         case 016: // Reset Interrupt Mask
           logmsg("sysc %03o Reset Interrupt Mask\n", sc->ctrl);
+	  sc->im = 0;
+          io_clrint(cpu, &sc->ri);
+          io_clrint(cpu, &sc->ti);
+          break;
+        case 017: // Reset
+          logmsg("sysc %03o Reset\n", sc->ctrl);
+	  sc->im = 0;
+          io_clrint(cpu, &sc->ri);
+          io_clrint(cpu, &sc->ti);
           break;
         default:
           logall("sysc %03o unsupported OCP order %03o\n", sc->ctrl, func);
@@ -278,7 +314,11 @@ sc_t *sc = *devparm;
           break;
 //      case 002: // Skip If Receiver not Interrupting
 //      case 003: // Skip If Control Registers Valid
-//      case 004: // Skip If Neither Receiver nor Transmitter Interrupting
+        case 004: // Skip If Neither Receiver nor Transmitter Interrupting
+          logmsg("sysc %03o Skip If Neither Receiver nor Transmitter Interrupting\n", sc->ctrl);
+	  if(sysc_poll(sc))
+            return 0;
+          break;
 //      case 005: // Skip If Transmitter not Interrupting
         case 006: // Skip Transmit Ready
           logmsg("sysc %03o Skip Transmit Ready\n", sc->ctrl);
@@ -380,7 +420,10 @@ sc_t *sc = *devparm;
           break;
 //      case 014: // Output Receive DMA/C Channel Address
 //      case 015: // Output Transmit DMA/C Channel Address
-//      case 016: // Output Receive Interrupt Vector
+        case 016: // Output Receive Interrupt Vector
+          sc->rv = G_A(cpu);
+          logmsg("sysc %03o Output Receive Interrupt Vector %4.4x\n", sc->ctrl, sc->t2);
+          break;
         case 017: // Output Transmit Interrupt Vector
           if(G_A(cpu) == 0)
           {

@@ -48,10 +48,10 @@
 
 typedef struct sys_t {
   size_t physsize;
-  octet_t *physstor;
-#define physsize_default (0x04000000)
-#define physsize_min     (0x00040000)
-#define physsize_max     (0x40000000)
+  uint8_t *physstor;
+#define physsize_default (0x01000000) // 16Mb
+#define physsize_min     (0x00040000) // 256Kb
+#define physsize_max     (0x20000000) // 512Mb
   int sswitches;
   int dswitches;
 
@@ -100,6 +100,8 @@ typedef struct sys_t {
 #define INTR_QSIZE 040
 #define INTR_QMASK (INTR_QSIZE-1)
 
+#define IDLE_WAIT 10000
+
 typedef enum {
   endop_setjmp = 0,
   endop_run    = 1,
@@ -132,7 +134,23 @@ typedef struct cpu_t {
       uint16_t b;
     } __attribute__ ((packed));
   };
+  union {
+    uint32_t  exec;
+    struct {
+      uint16_t ep;
+      uint16_t eb;
+    } __attribute__ ((packed));
+  };
+  union {
+    uint32_t  po;
+    struct {
+      uint16_t bp;
+      uint16_t bb;
+    } __attribute__ ((packed));
+  };
   uint32_t maxmem;
+  int atr;
+  uint64_t c;
   jmp_buf endop;
   jmp_buf smode;
   sys_t *sys;
@@ -162,15 +180,14 @@ typedef struct cpu_t {
   } iotlb;
   struct {
     pthread_mutex_t mutex;
+#if defined(IDLE_WAIT)
+    pthread_cond_t cond;
+#endif
     volatile int32_t v[INTR_QSIZE];
     volatile int32_t c;
     volatile int     a;
     volatile int     n;
   } intr;
-  int atr;
-  uint32_t po;
-  uint32_t exec;
-  uint64_t c;
 #if !defined(MODEL)
   struct cpumodel_t model;
 #endif
@@ -198,6 +215,17 @@ typedef struct cpu_t {
     volatile enum { stopped = 0, stepping = 1, started = 2 } status;
   } halt;
 } cpu_t;
+
+static inline void mm_piotlb(cpu_t *cpu)
+{
+  memset(cpu->iotlb.i, 0xff, sizeof(cpu->iotlb.i));
+}
+
+static inline void mm_ptlb(cpu_t *cpu)
+{
+  memset(cpu->tlb.v, 0xff, sizeof(cpu->tlb.v));
+  mm_piotlb(cpu);
+}
 
 static inline uint32_t em50_timer(void)
 {
@@ -282,10 +310,17 @@ static inline int cpu_started(cpu_t *cpu)
 }
 
 #ifdef DEBUG
+ static pthread_mutex_t _loglock = PTHREAD_MUTEX_INITIALIZER;
  #define logall(...) \
   do { \
     if(cpu->sys->trace /* && cpu->crs->ownerl == 0x8040 && ea_ring(cpu->pb) == 3 */ ) \
-      fprintf(cpu->sys->trace, __VA_ARGS__); \
+    { \
+      char _logline[1024]; \
+      snprintf(_logline, sizeof(_logline), __VA_ARGS__); \
+      pthread_mutex_lock(&_loglock); \
+      fputs(_logline, cpu->sys->trace); \
+      pthread_mutex_unlock(&_loglock); \
+    } \
   } while (0)
 #else
  #define logall(...) do {} while (0)
@@ -345,6 +380,7 @@ typedef union {
   } __attribute__ ((packed));
   uint32_t d;
 } ieee_flt;
+assert_size(ieee_flt, 4);
 
 
 typedef union {
@@ -355,6 +391,7 @@ typedef union {
   } __attribute__ ((packed));
   uint32_t d;
 } em50_flt;
+assert_size(em50_flt, 4);
 
 
 typedef union {
@@ -366,6 +403,7 @@ typedef union {
   } __attribute__ ((packed));
   uint64_t q;
 } ieee_dbl;
+assert_size(ieee_dbl, 8);
 
 
 typedef union {
@@ -376,6 +414,22 @@ typedef union {
   } __attribute__ ((packed));
   uint64_t q;
 } em50_dbl;
+assert_size(em50_dbl, 8);
+
+
+#ifdef FLOAT128
+typedef union {
+  __float128 qad;
+  struct {
+    __uint128_t mantissa : 112;
+    __uint128_t exponent : 15;
+    __uint128_t sign : 1;
+  } __attribute__ ((packed));
+  __uint128_t q;
+} ieee_qad;
+assert_size(ieee_qad, 16);
+#endif
+
 
 typedef union {
   struct {
@@ -384,11 +438,21 @@ typedef union {
   } __attribute__ ((packed));
   uint64_t q;
 } em50_qex;
+assert_size(em50_qex, 8);
+
 
 typedef struct {
-  em50_qex qex;
-  em50_dbl dbl;
+  union {
+    struct {
+      em50_dbl dbl;
+      em50_qex qex;
+    } __attribute__ ((packed));
+#ifdef UINT128
+    __uint128_t q;
+#endif
+  };
 } __attribute__ ((packed)) em50_qad;
+assert_size(em50_qad, 16);
 
 
 static inline void f2d(em50_dbl *d, em50_flt *f)
@@ -423,6 +487,19 @@ em50_flt f;
   return f.d;
 }
 
+#if 0
+static inline uint64_t _setdac(uint64_t dac)
+{
+  return dac;
+}
+
+static inline uint64_t _getdac(uint64_t dac)
+{
+  return dac;
+}
+#endif
+
+
 #define G_R(_u, _r)      ((_u)->crs->gr[(_r)].r)
 #define G_RL(_u, _r)     ((_u)->crs->gr[(_r)].l)
 #define G_RH(_u, _r)     ((_u)->crs->gr[(_r)].h)
@@ -440,6 +517,7 @@ em50_flt f;
 #define G_E(_u)          G_R(_u, 3)
 #define G_EH(_u)         G_RH(_u, 3)
 #define G_Y(_u)          G_RH(_u, 5)
+#define G_T(_u)          G_RL(_u, 5)
 #define G_X(_u)          G_RH(_u, 7)
 
 #define S_A(_u, _v)      S_RH(_u, 2, _v)
@@ -447,6 +525,7 @@ em50_flt f;
 #define S_L(_u, _v)      S_R(_u, 2, _v)
 #define S_E(_u, _v)      S_R(_u, 3, _v)
 #define S_Y(_u, _v)      S_RH(_u, 5, _v)
+#define S_T(_u, _v)      S_RL(_u, 5, _v)
 #define S_X(_u, _v)      S_RH(_u, 7, _v)
 
 #define G_SP(_c) G_Y(_c)
@@ -473,10 +552,10 @@ em50_flt f;
 
 #define S_KEYS(_u, _k) \
 do {  \
-  km_t km = { .keys = (_k) }; \
-  if(km.mode == km_e101 || km.mode == km_e111) \
-    km.mode = (_u)->crs->km.mode; \
-  (_u)->crs->km.keys = km.keys; \
+  km_t _km = { .keys = (_k) }; \
+  if(_km.mode == km_e101 || _km.mode == km_e111) \
+    _km.mode = (_u)->crs->km.mode; \
+  (_u)->crs->km.keys = _km.keys; \
 } while (0)
 
 #define G_DMA_X(_u, _c)  ((_u)->srf.drf.dma[(_c)].xfer)
@@ -494,14 +573,15 @@ do {  \
 #define S_DMA_L(_u, _c, _v) (S_DMA_X(_u, _c, (G_DMA_X(_u, _c) & 0x000f) | ((-(int16_t)(_v)) << 4)))
 
 #define FAR(_o) ((_o[1] & 0b1000) >> 3)
-#define G_FAR(_u, _n) ((_u)->crs->fr[(_n)].a)
-#define G_FXR(_u, _n) ((_u)->crs->fr[(_n)].l)
+#define G_FAR(_u, _n) ((_u)->crs->fr[(_n)].h)
+#define G_FXR(_u, _n) (((_u)->crs->fr[(_n)].l << 16) | ((_u)->crs->fr[(_n)].l >> 16))
 #define G_FLR(_u, _n) (G_FXR(_u,_n) & 0x001fffff)
 #define G_FBR(_u, _n) (G_FXR(_u,_n) >> 28) 
 
-#define S_FAR(_u, _n, _v) ((_u)->crs->fr[(_n)].a = (_v))
-#define S_FLR(_u, _n, _v) ((_u)->crs->fr[(_n)].l = ((G_FXR(_u, _n) & 0xf0000000) | ((_v) & 0x001fffff)))
-#define S_FBR(_u, _n, _v) ((_u)->crs->fr[(_n)].l = (G_FLR(_u, _n) | ((_v) << 28)))
+#define S_FAR(_u, _n, _v) ((_u)->crs->fr[(_n)].h = (_v))
+#define S_FXR(_u, _n, _v) ((_u)->crs->fr[(_n)].l = (((_v) << 16) | ((_v) >> 16)))
+#define S_FLR(_u, _n, _v) (S_FXR((_u), (_n), ((G_FXR(_u, _n) & 0xf0000000) | ((_v) & 0x001fffff))))
+#define S_FBR(_u, _n, _v) (S_FXR((_u), (_n), (G_FLR(_u, _n) | ((_v) << 28))))
 
 #define G_PCB(_u)       ((_u)->owner)
 #define S_FCODE(_u, _v) ((_u)->fcode = (_v))
@@ -513,6 +593,7 @@ static inline uint32_t sdt_r_elim(uint32_t u) { return ((u & sdt_h) >> 1) | (u &
 #define G_DTAR_A(_c, _d) (sdt_r_elim((_c)->crs->dtar[(_d)]) << 1)
 
 #define FAC(_o) ((_o[0] & 0b1))
+#define IFAC(_o) ((_o[1] & 0b1000) >> 3)
 #define G_AC(_c, _f)     ((_c)->crs->fr[(_f)].q)
 #define S_AC(_c, _f, _v) ((_c)->crs->fr[(_f)].q = (_v))
 
@@ -522,12 +603,12 @@ static inline uint32_t sdt_r_elim(uint32_t u) { return ((u & sdt_h) >> 1) | (u &
 #define G_FAC(_c, _a)   _d2f(G_AC(_c, _a))
 #define S_FAC(_c, _a, _v) S_AC(_c, _a, _f2d(_v))
 
-#define G_FACH(_c)      ((_c)->crs->fr[1].ah)
-#define G_FACL(_c)      ((_c)->crs->fr[1].al)
+#define G_FACH(_c)      ((_c)->crs->fr[1].hh)
+#define G_FACL(_c)      ((_c)->crs->fr[1].hl)
 #define G_FACE(_c)      ((_c)->crs->fr[1].ll)
 
-#define S_FACH(_c, _v)  ((_c)->crs->fr[1].ah = (_v))
-#define S_FACL(_c, _v)  ((_c)->crs->fr[1].al = (_v))
+#define S_FACH(_c, _v)  ((_c)->crs->fr[1].hh = (_v))
+#define S_FACL(_c, _v)  ((_c)->crs->fr[1].hl = (_v))
 #define S_FACE(_c, _v)  ((_c)->crs->fr[1].ll = (_v))
 
 #define G_VSC(_c)       (G_FACE(_c) & 0xff)

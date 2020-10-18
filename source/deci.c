@@ -46,10 +46,12 @@
 #ifndef _deci_c
 #define _deci_c
 
+typedef __int128_t intdec_t;
+
 #define dcw_dt_ls 0   /* Leading Separate */
 #define dcw_dt_ts 1   /* Trailing Separate */
 #define dcw_dt_pd 3   /* Packed Decimal */
-#define dcw_dt_le 4   /* Leadning Embedded */
+#define dcw_dt_le 4   /* Leading Embedded */
 #define dcw_dt_te 5   /* Trailing Embedded */
 
 typedef union {
@@ -68,14 +70,37 @@ typedef union {
   };
   uint32_t w;
 } dcw_t;
+assert_size(dcw_t, 4);
 
 typedef struct {
-  uint8_t sc;
-  uint8_t fc;
-  int sp;
+  uint8_t fc; // Floating character in AH
+  uint8_t cf; // Condition flag in AL
+  uint8_t br; // Bytes remaining in BH
+  uint8_t sc; // Suppression character in BL
+  uint8_t sp;
   int sign;
   int sig;
 } xed_iv;
+
+static inline void xed_get_iv(cpu_t *cpu, xed_iv *iv)
+{
+uint16_t a = G_A(cpu);
+uint16_t b = G_B(cpu);
+
+  iv->fc = a >> 8;
+  iv->cf = a & 0xff;
+  iv->br = b >> 8;
+  iv->sc = b & 0xff;
+}
+
+static inline void xed_set_iv(cpu_t *cpu, xed_iv *iv)
+{
+uint16_t a = iv->fc << 8 | iv->cf;
+uint16_t b = iv->br << 8 | iv->sc;
+
+  S_A(cpu, a);
+  S_B(cpu, b);
+}
 
 static inline unsigned int dcw_type(dcw_t dcw, int far)
 {
@@ -97,21 +122,30 @@ static inline unsigned int dcw_digits(dcw_t dcw, int far)
   return far ? dcw.f : dcw.a;
 }
 
-static inline int64_t dcw_scale(dcw_t dcw, int xmv, int64_t value)
+static inline intdec_t dcw_scale(dcw_t dcw, int xmv, intdec_t value)
 {
   int16_t scale = (dcw.g & 0x40) ? dcw.g | 0xff80 : dcw.g;
-  
+
+//printf("scale %d, value %jd\n", scale, (intmax_t)value);
   if(scale < 0)
   {
-    int64_t mult = pow(10, -scale);
+    intdec_t mult = pow(10, -scale);
     value *= mult;
   }
   else if(scale > 0)
   {
-    int64_t div = pow(10, scale);
+//static const int adj[] = { 1, 0, 1, 0, 0 };
+//int lz = value ? dcw.f - log10(value >= 0 ? value : -value) - adj[dcw.e] : 0;
+//if(lz) printf("lz %d v %jd\n", lz, (intmax_t)value);
+//    if(!xmv && lz < scale)
+//      scale += lz;
+    intdec_t div = pow(10, scale < 40 ? scale : 39);
+    if(!div) { div = 1; value = 0;}
 // THIS IS WRONG FOR XCM, WHICH SHOULD IGNORE DCW.D
-    int64_t rnd = (!xmv || (xmv && dcw.d)) ? div / 2 : 0;
+    intdec_t rnd = (!xmv || (xmv && dcw.d)) ? div / 2 : 0;
+//  intdec_t rnd = (xmv && dcw.d) ? div / 2 : 0;
     value = (value + (value > 0 ? rnd : -rnd)) / div;
+//printf("value %jd\n", (intmax_t)value);
   }
 
   return value;
@@ -122,48 +156,41 @@ static inline int64_t dcw_scale(dcw_t dcw, int xmv, int64_t value)
 
 #define noupd 0
 #define update 1
-static inline void E50X(store_bytes)(cpu_t *cpu, uint8_t *bytes, const int far, int count, const int updfar)
+static inline void E50X(store_bytes)(cpu_t *cpu, uint8_t *bytes, int count, uint32_t *far, int *fbr)
 {
   if(count == 0)
     return;
 
-uint32_t f = G_FAR(cpu, far);
-int bit = G_FBR(cpu, far);
-
-  if(bit != 0)
+  if(*fbr != 0)
   {
-  uint16_t w = (E50X(vfetch_w)(cpu, f) & 0xff00) | *bytes++;
-    E50X(vstore_w)(cpu, f++, w);
+  uint16_t w = (E50X(vfetch_w)(cpu, *far) & 0xff00) | *bytes++;
+    E50X(vstore_w)(cpu, (*far), w);
+    inc_d(far);
     --count;
-    bit = 0;
+    *fbr = 0;
   }
 
   for(int n = count / 2; n > 0; --n, count -= 2)
   {
   uint16_t w = *bytes++ << 8;
            w |= *bytes++;
-    E50X(vstore_w)(cpu, f++, w);
+    E50X(vstore_w)(cpu, (*far), w);
+    inc_d(far);
   }
 
   if(count > 0)
   {
-  uint16_t w = (E50X(vfetch_w)(cpu, f) & 0x00ff) | (*bytes << 8);
-    E50X(vstore_w)(cpu, f, w);
-    bit = 8;
-  }
-
-  if(updfar)
-  {
-    S_FBR(cpu, far, bit);
-    S_FAR(cpu, far, f);
+  uint16_t w = (E50X(vfetch_w)(cpu, *far) & 0x00ff) | (*bytes << 8);
+    E50X(vstore_w)(cpu, *far, w);
+    *fbr = 8;
   }
 }
 
-static inline void E50X(store_ls)(cpu_t *cpu, int far, int digits, int64_t value)
+static inline void E50X(store_ls)(cpu_t *cpu, int digits, intdec_t value, uint32_t *far, int *fbr)
 {
 uint8_t ls[digits + 1];
 
-  logmsg("decimal E50X(store_ls) far %d digits %d value %jd\n", far, digits, (intmax_t)value);
+  logmsg("decimal E50X(store_ls) far %8.8x digits %d value %jd\n", *far, digits, (intmax_t)value);
 
   ls[0] = value < 0 ? '-' : '+';
   if(!cpu->crs->km.ascii)
@@ -180,14 +207,14 @@ uint8_t ls[digits + 1];
       ls[n] |= 0x80;
   }
 
-  E50X(store_bytes)(cpu, ls, far, digits + 1, noupd);
+  E50X(store_bytes)(cpu, ls, digits + 1, far, fbr);
 }
 
-static inline void E50X(store_ts)(cpu_t *cpu, int far, int digits, int64_t value)
+static inline void E50X(store_ts)(cpu_t *cpu, int digits, intdec_t value, uint32_t *far, int *fbr)
 {
 uint8_t ls[digits + 1];
 
-  logmsg("decimal E50X(store_ts) far %d digits %d value %jd\n", far, digits, (intmax_t)value);
+  logmsg("decimal E50X(store_ts) far %8.8x digits %d value %jd\n", *far, digits, (intmax_t)value);
 
   int neg = value < 0;
 
@@ -207,12 +234,12 @@ uint8_t ls[digits + 1];
   if(!cpu->crs->km.ascii)
     ls[digits] |= 0x80;
 
-  E50X(store_bytes)(cpu, ls, far, digits + 1, noupd);
+  E50X(store_bytes)(cpu, ls, digits + 1, far, fbr);
 }
 
-static inline void E50X(store_pd)(cpu_t *cpu, int far, int digits, int64_t value)
+static inline void E50X(store_pd)(cpu_t *cpu, int digits, intdec_t value, uint32_t *far, int *fbr)
 {
-  logmsg("decimal E50X(store_pd) far %d digits %d value %jd\n", far, digits, (intmax_t)value);
+  logmsg("decimal E50X(store_pd) far %8.8x digits %d value %jd\n", *far, digits, (intmax_t)value);
 
   if(!(digits & 1))
     ++digits;
@@ -237,14 +264,14 @@ static inline void E50X(store_pd)(cpu_t *cpu, int far, int digits, int64_t value
 
   pd[bytes - 1] |= neg ? 0x0d : 0x0c;
 
-  E50X(store_bytes)(cpu, pd, far, bytes, noupd);
+  E50X(store_bytes)(cpu, pd, bytes, far, fbr);
 }
 
-static inline void E50X(store_le)(cpu_t *cpu, int far, int digits, int64_t value)
+static inline void E50X(store_le)(cpu_t *cpu, int digits, intdec_t value, uint32_t *far, int *fbr)
 {
 uint8_t ls[digits];
 
-  logmsg("decimal E50X(store_le) far %d digits %d value %jd\n", far, digits, (intmax_t)value);
+  logmsg("decimal E50X(store_le) far %8.8x digits %d value %jd\n", *far, digits, (intmax_t)value);
 
   int neg = value < 0;
 
@@ -269,14 +296,14 @@ uint8_t ls[digits];
       ls[0] |= 0x80;
   }
 
-  E50X(store_bytes)(cpu, ls, far, digits, noupd);
+  E50X(store_bytes)(cpu, ls, digits, far, fbr);
 }
 
-static inline void E50X(store_te)(cpu_t *cpu, const int far, const int digits, int64_t value)
+static inline void E50X(store_te)(cpu_t *cpu, const int digits, intdec_t value, uint32_t *far, int *fbr)
 {
 uint8_t ls[digits];
 
-  logmsg("decimal E50X(store_te) far %d digits %d value %jd\n", far, digits, (intmax_t)value);
+  logmsg("decimal E50X(store_te) far %8.8x digits %d value %jd\n", *far, digits, (intmax_t)value);
 
   int neg = value < 0;
 
@@ -301,50 +328,43 @@ uint8_t ls[digits];
       ls[digits - 1] |= 0x80;
   }
 
-  E50X(store_bytes)(cpu, ls, far, digits, noupd);
+  E50X(store_bytes)(cpu, ls, digits, far, fbr);
 }
 
-static inline void E50X(load_bytes)(cpu_t *cpu, uint8_t *bytes, const int far, int count, const int updfar)
+static inline void E50X(load_bytes)(cpu_t *cpu, uint8_t *bytes, int count, uint32_t *far, int *fbr)
 {
   if(count == 0)
     return;
 
-uint32_t f = G_FAR(cpu, far);
-int bit = G_FBR(cpu, far);
-
-  if(bit != 0)
+  if(*fbr != 0)
   {
-    *bytes++ = E50X(vfetch_w)(cpu, f++) & 0xff;
+    *bytes++ = E50X(vfetch_w)(cpu, (*far)) & 0xff;
+    inc_d(far);
     --count;
-    bit = 0;
+    *fbr = 0;
   }
 
   for(int n = count / 2; n > 0; --n, count -= 2)
   {
-  uint16_t w = E50X(vfetch_w)(cpu, f++);
+  uint16_t w = E50X(vfetch_w)(cpu, (*far));
+    inc_d(far);
     *bytes++ = w >> 8;
     *bytes++ = w & 0xff;
   }
 
   if(count > 0)
   {
-    *bytes = E50X(vfetch_w)(cpu, f) >> 8;
-    bit = 8;
-  }
-
-  if(updfar)
-  {
-    S_FBR(cpu, far, bit);
-    S_FAR(cpu, far, f);
+    *bytes = E50X(vfetch_w)(cpu, *far) >> 8;
+    *fbr = 8;
   }
 }
 
-static inline int64_t E50X(load_ls)(cpu_t *cpu, int far, int digits)
+static inline intdec_t E50X(load_ls)(cpu_t *cpu, int digits, uint32_t *far, int *fbr)
 {
-int64_t r = 0;
+intdec_t r = 0;
 uint8_t ls[digits + 1];
 
-  E50X(load_bytes)(cpu, ls, far, digits + 1, noupd);
+  E50X(load_bytes)(cpu, ls, digits + 1, far, fbr);
   for(int n = 1; n <= digits; n++)
   {
     r *= 10;
@@ -355,17 +375,17 @@ uint8_t ls[digits + 1];
   if((ls[0] & 0b100))
     r = -r;
 
-  logmsg("decimal E50X(load_ls) far %d digits %d value %jd\n", far, digits, (intmax_t)r);
+  logmsg("decimal E50X(load_ls) far %8.8x digits %d value %jd\n", *far, digits, (intmax_t)r);
 
   return r;
 }
 
-static inline int64_t E50X(load_ts)(cpu_t *cpu, int far, int digits)
+static inline intdec_t E50X(load_ts)(cpu_t *cpu, int digits, uint32_t *far, int *fbr)
 {
-int64_t r = 0;
+intdec_t r = 0;
 uint8_t ts[digits + 1];
 
-  E50X(load_bytes)(cpu, ts, far, digits + 1, noupd);
+  E50X(load_bytes)(cpu, ts, digits + 1, far, fbr);
   for(int n = 0; n < digits; n++)
   {
     r *= 10;
@@ -376,12 +396,12 @@ uint8_t ts[digits + 1];
   if((ts[digits] & 0b100))
     r = -r;
 
-  logmsg("decimal E50X(load_ts) far %d digits %d value %jd\n", far, digits, (intmax_t)r);
+  logmsg("decimal E50X(load_ts) far %8.8x digits %d value %jd\n", *far, digits, (intmax_t)r);
 
   return r;
 }
 
-static inline int64_t E50X(load_pd)(cpu_t *cpu, int far, int digits)
+static inline intdec_t E50X(load_pd)(cpu_t *cpu, int digits, uint32_t *far, int *fbr)
 {
   if(!digits)
     return 0;
@@ -392,9 +412,9 @@ static inline int64_t E50X(load_pd)(cpu_t *cpu, int far, int digits)
   int bytes = (digits + 1) / 2;
   uint8_t pd[bytes];
 
-  E50X(load_bytes)(cpu, pd, far, bytes, noupd);
+  E50X(load_bytes)(cpu, pd, bytes, far, fbr);
 
-  uint64_t value = 0;
+  intdec_t value = 0;
 
   int n;
   for(n = 0; n < bytes - 1; ++n)
@@ -408,22 +428,21 @@ static inline int64_t E50X(load_pd)(cpu_t *cpu, int far, int digits)
   if((pd[n] & 0x0f) == 0x0d)
     value = -value;
 
-  logmsg("decimal E50X(load_pd) far %d digits %d value %jd\n", far, digits, (intmax_t)value);
+  logmsg("decimal E50X(load_pd) far %8.8x digits %d value %jd\n", *far, digits, (intmax_t)value);
 
   return value;
 }
 
-static inline int64_t E50X(load_le)(cpu_t *cpu, int far, int digits)
+static inline intdec_t E50X(load_le)(cpu_t *cpu, int digits, uint32_t *far, int *fbr)
 {
-int64_t r;
+intdec_t r;
 uint8_t le[digits];
 
-  E50X(load_bytes)(cpu, le, far, digits, noupd);
+  E50X(load_bytes)(cpu, le, digits, far, fbr);
 
   uint8_t t = le[0] & 0x7f;
   int neg = t == '}' || t == '-' || (t >= 'J' && t <= 'R');
-  r = (t >= 'J' && t <= 'R') ? t - 'I' : (t == '}' || t == '-') ? 0 : t & 0xf;
-
+  r = ((t >= 'J' && t <= 'R') ? t - 'I' : (t == '}' || t == '-' || t == '{' || t == '+') ? 0 : t) & 0xf;
   for(int n = 1; n < digits; n++)
   {
     r *= 10;
@@ -434,17 +453,17 @@ uint8_t le[digits];
   if(neg)
     r = -r;
 
-  logmsg("decimal E50X(load_le) far %d digits %d value %jd\n", far, digits, (intmax_t)r);
+  logmsg("decimal E50X(load_le) far %8.8x digits %d value %jd\n", *far, digits, (intmax_t)r);
 
   return r;
 }
 
-static inline int64_t E50X(load_te)(cpu_t *cpu, int far, int digits)
+static inline intdec_t E50X(load_te)(cpu_t *cpu, int digits, uint32_t *far, int *fbr)
 {
-int64_t r = 0;
+intdec_t r = 0;
 uint8_t te[digits];
 
-  E50X(load_bytes)(cpu, te, far, digits, noupd);
+  E50X(load_bytes)(cpu, te, digits, far, fbr);
 
   for(int n = 0; n < digits - 1; n++)
   {
@@ -456,44 +475,47 @@ uint8_t te[digits];
 
   uint8_t l = te[digits - 1] & 0x7f;
   int neg = l == '}' || l == '-' || (l >= 'J' && l <= 'R');
-  r += (l >= 'J' && l <= 'R') ? l - 'I' : (l == '}' || l == '-') ? 0 : l & 0xf;
+  r += ((l >= 'J' && l <= 'R') ? l - 'I' : (l == '}' || l == '-' || l == '{' || l == '+') ? 0 : l) & 0xf;
 
   if(neg)
     r = -r;
 
-  logmsg("decimal E50X(load_te) far %d digits %d value %jd\n", far, digits, (intmax_t)r);
+  logmsg("decimal E50X(load_te) far %8.8x digits %d value %jd\n", *far, digits, (intmax_t)r);
 
   return r;
 }
 
-static inline int64_t E50X(load_decimal)(cpu_t *cpu, dcw_t dcw, int far)
+static inline intdec_t E50X(load_decimal)(cpu_t *cpu, dcw_t dcw, int far, uint32_t *far0, int *fbr0)
 {
 int type = dcw_type(dcw, far);
 int sign = dcw_sign(dcw, far);
 int digits = dcw_digits(dcw, far);
 
-int64_t r;
+intdec_t r;
+
+  if(!digits)
+    return 0;
 
   switch(type) {
 
     case dcw_dt_ls:
-      r = E50X(load_ls)(cpu, far, digits);
+      r = E50X(load_ls)(cpu, digits, far0, fbr0);
       break;
 
     case dcw_dt_ts:
-      r = E50X(load_ts)(cpu, far, digits);
+      r = E50X(load_ts)(cpu, digits, far0, fbr0);
       break;
 
     case dcw_dt_pd:
-      r = E50X(load_pd)(cpu, far, digits);
+      r = E50X(load_pd)(cpu, digits, far0, fbr0);
       break;
 
     case dcw_dt_le:
-      r = E50X(load_le)(cpu, far, digits);
+      r = E50X(load_le)(cpu, digits, far0, fbr0);
       break;
 
     case dcw_dt_te:
-      r = E50X(load_te)(cpu, far, digits);
+      r = E50X(load_te)(cpu, digits, far0, fbr0);
       break;
 
     default:
@@ -506,7 +528,7 @@ int64_t r;
   return r;
 }
 
-static inline void E50X(store_decimal)(cpu_t *cpu, dcw_t dcw, int far, int64_t value)
+static inline void E50X(store_decimal)(cpu_t *cpu, dcw_t dcw, int far, intdec_t value, uint32_t *far1, int *fbr1)
 {
 int type = dcw_type(dcw, far);
 int abs = dcw_abs(dcw);
@@ -518,23 +540,23 @@ int digits = dcw_digits(dcw, far);
   switch(type) {
 
     case dcw_dt_ls:
-      E50X(store_ls)(cpu, far, digits, value);
+      E50X(store_ls)(cpu, digits, value, far1, fbr1);
       break;
 
     case dcw_dt_ts:
-      E50X(store_ts)(cpu, far, digits, value);
+      E50X(store_ts)(cpu, digits, value, far1, fbr1);
       break;
 
     case dcw_dt_pd:
-      E50X(store_pd)(cpu, far, digits, value);
+      E50X(store_pd)(cpu, digits, value, far1, fbr1);
       break;
 
     case dcw_dt_le:
-      E50X(store_le)(cpu, far, digits, value);
+      E50X(store_le)(cpu, digits, value, far1, fbr1);
       break;
 
     case dcw_dt_te:
-      E50X(store_te)(cpu, far, digits, value);
+      E50X(store_te)(cpu, digits, value, far1, fbr1);
       break;
 
     default:
@@ -560,7 +582,7 @@ int digits = dcw_digits(dcw, far);
 #define XED_SD  017
 #define XED_EBS 020
 
-static inline void E50X(xed_zs)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m)
+static inline void E50X(xed_zs)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m, uint32_t *far0, int *fbr0, uint32_t *far1, int *fbr1)
 {
   logmsg("decimal xed Zero Suppress %d digits\n", m);
 
@@ -569,32 +591,32 @@ static inline void E50X(xed_zs)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m
 
   uint8_t d[m+1];
 
-  E50X(load_bytes)(cpu, d, 0, m, update);
+  E50X(load_bytes)(cpu, d, m, far0, fbr0);
 
   int n;
   for(n = 0; !iv->sig && n < m && ((d[n] & 0x7f) == '0' || (d[n] & 0x7f) == '+' || (d[n] & 0x7f) == '-'); ++n)
     d[n] = iv->sc;
   if(n < m)
   {
-    if(((n > 0) | !iv->sp) && iv->fc)
+    if(((n > 0) | !iv->cf) && iv->fc)
     {
       for(int i = m; i > n; --i)
         d[i] = d[i-1];
       d[n] = iv->fc;
-      iv->sp = 1;
+      iv->cf = 1;
       ++m;
     }
     iv->sig = 1;
   }
 
-  E50X(store_bytes)(cpu, d, 1, m, update);
+  E50X(store_bytes)(cpu, d, m, far1, fbr1);
 }
 
-static inline void E50X(xed_il)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m)
+static inline void E50X(xed_il)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m, uint32_t *far1, int *fbr1)
 {
   logmsg("decimal xed Insert Literal 0x%02x '%c'\n", m, m & 0x7f);
 
-  E50X(store_bytes)(cpu, &m, 1, 1, update);
+  E50X(store_bytes)(cpu, &m, 1, far1, fbr1);
 }
 
 static inline void E50X(xed_ss)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m)
@@ -603,45 +625,45 @@ static inline void E50X(xed_ss)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m
   iv->sc = m;
 }
 
-static inline void E50X(xed_ics)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m)
+static inline void E50X(xed_ics)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m, uint32_t *far1, int *fbr1)
 {
   logmsg("decimal xed Insert Character 0x%02x '%c'\n", m, m & 0x7f);
-  E50X(store_bytes)(cpu, iv->sig ? &m : &iv->sc, 1, 1, update);
+  E50X(store_bytes)(cpu, iv->sig ? &m : &iv->sc, 1, far1, fbr1);
 }
 
-static inline void E50X(xed_id)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m)
+static inline void E50X(xed_id)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m, uint32_t *far0, int *fbr0, uint32_t *far1, int *fbr1)
 {
   logmsg("decimal xed Insert %d digits\n", m);
 
-  if((!iv->sp || !iv->sig) && iv->fc)
+  if((!iv->cf || !iv->sig) && iv->fc)
   {
   uint8_t d[m + 1];
     d[0] = iv->fc;
-    iv->sp = 1;
-    E50X(load_bytes)(cpu, d + 1, 0, m, update);
-    E50X(store_bytes)(cpu, d, 1, m + 1, update);
+    iv->cf = 1;
+    E50X(load_bytes)(cpu, d + 1, m, far0, fbr0);
+    E50X(store_bytes)(cpu, d, m + 1, far1, fbr1);
   }
   else
   {
   uint8_t d[m];
-    E50X(load_bytes)(cpu, d, 0, m, update);
-    E50X(store_bytes)(cpu, d, 1, m, update);
+    E50X(load_bytes)(cpu, d, m, far0, fbr0);
+    E50X(store_bytes)(cpu, d, m, far1, fbr1);
   }
   iv->sig = 1;
 }
 
-static inline void E50X(xed_icm)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m)
+static inline void E50X(xed_icm)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m, uint32_t *far1, int *fbr1)
 {
   logmsg("*decimal xed Insert Character 0x%02x '%c' if minus\n", m, m & 0x7f);
-  E50X(store_bytes)(cpu, iv->sign ? &m : &iv->sc, 1, 1, update);
-  iv->sp = 1;
+  E50X(store_bytes)(cpu, iv->sign ? &m : &iv->sc, 1, far1, fbr1);
+  iv->cf = 1;
 }
 
-static inline void E50X(xed_icp)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m)
+static inline void E50X(xed_icp)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m, uint32_t *far1, int *fbr1)
 {
   logmsg("*decimal xed Insert Character 0x%02x '%c' if plus\n", m, m & 0x7f);
-  E50X(store_bytes)(cpu, iv->sign ? &iv->sc : &m, 1, 1, update);
-  iv->sp = 1;
+  E50X(store_bytes)(cpu, iv->sign ? &iv->sc : &m, 1, far1, fbr1);
+  iv->cf = 1;
 }
 
 static inline void E50X(xed_sfc)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m)
@@ -673,42 +695,42 @@ static inline void E50X(xed_sfs)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t 
 
 static inline void E50X(xed_jz)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m)
 {
-  logmsg("*decimal xed Jump if zero\n");
-  if(!iv->sc)
+  logmsg("*decimal xed Jump if zero (%d)\n", iv->cf);
+  if(iv->cf)
     *spa += m;
 }
 
-static inline void E50X(xed_fs)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m)
+static inline void E50X(xed_fs)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m, uint32_t *far1, int *fbr1)
 {
   logmsg("*decimal xed Fill with %d suppression characters\n", m);
   uint8_t d[m];
   memset(d, iv->sc, m);
-  E50X(store_bytes)(cpu, d, 1, m, update);
+  E50X(store_bytes)(cpu, d, m, far1, fbr1);
 }
 
-static inline void E50X(xed_sf)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m)
+static inline void E50X(xed_sf)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m, uint32_t *far1, int *fbr1)
 {
   logmsg("*decimal xed Set significance\n");
   if(iv->fc)
   {
-    E50X(store_bytes)(cpu, &iv->fc, 1, 1, update);
-    iv->sp = 1;
+    E50X(store_bytes)(cpu, &iv->fc, 1, far1, fbr1);
+    iv->cf = 1;
   }
   iv->sig = 1;
 }
 
-static inline void E50X(xed_is)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m)
+static inline void E50X(xed_is)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m, uint32_t *far1, int *fbr1)
 {
   logmsg("*decimal xed Insert Sign\n");
   uint8_t s = iv->sign ? 0255 : 0253;
-  E50X(store_bytes)(cpu, &s, 1, 1, update);
+  E50X(store_bytes)(cpu, &s, 1, far1, fbr1);
 }
 
-static inline void E50X(xed_sd)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m)
+static inline void E50X(xed_sd)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m, uint32_t *far0, int *fbr0, uint32_t *far1, int *fbr1)
 {
   logmsg("*decimal xed Suppress %d digits\n", m);
   uint8_t d[m];
-  E50X(load_bytes)(cpu, d, 0, m, update);
+  E50X(load_bytes)(cpu, d, m, far0, fbr0);
 
   if(!iv->sig)
     for(int n = 0; n < m && (d[n] & 0x7f) == '0'; ++n)
@@ -718,20 +740,20 @@ static inline void E50X(xed_sd)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m
       if((d[n] & 0x7f) == '0')
         d[n] = iv->sc;
 
-  E50X(store_bytes)(cpu, d, 1, m, update);
+  E50X(store_bytes)(cpu, d, m, far1, fbr1);
 }
 
-static inline void E50X(xed_ebs)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m)
+static inline void E50X(xed_ebs)(cpu_t *cpu, xed_iv *iv, uint32_t *spa, uint8_t m, uint32_t *far0, int *fbr0, uint32_t *far1, int *fbr1)
 {
   logmsg("decimal xed Embed sign for %d digits\n", m);
   uint8_t d[m];
-  E50X(load_bytes)(cpu, d, 0, m, update);
+  E50X(load_bytes)(cpu, d, m, far0, fbr0);
 
   if(iv->sign)
     for(int n = 0; n < m; ++n)
       d[n] = ((d[n] & 0x7f) == '0') ? 0375 /* '}' */ : d[n] + 'I' - '0';
 
-  E50X(store_bytes)(cpu, d, 1, m, update);
+  E50X(store_bytes)(cpu, d, m, far1, fbr1);
 }
 
 
@@ -739,25 +761,30 @@ E50I(xmv)
 {
 dcw_t cw = {.w = G_L(cpu) };
 
+uint32_t far0 = G_FAR(cpu, 0);
+int fbr0 = G_FBR(cpu, 0);
+uint32_t far1 = G_FAR(cpu, 1);
+int fbr1 = G_FBR(cpu, 1);
 #ifdef DEBUG
-uint32_t src = G_FAR(cpu, 0);
-int srb = G_FBR(cpu, 0);
-int srl = G_FLR(cpu, 1);
-uint32_t dst = G_FAR(cpu, 1);
-int dsb = G_FBR(cpu, 1);
-int dsl = G_FLR(cpu, 1);
+int flr0 = G_FLR(cpu, 0);
+int flr1 = G_FLR(cpu, 1);
 
   logop1(op, "*xmv");
-  logmsg("-> %8.8x+%x %x %8.8x+%x %x\n", src, srb, srl, dst, dsb, dsl);
+  logmsg("-> %8.8x+%x %x %8.8x+%x %x\n", far0, fbr0, flr0, far1, fbr1, flr1);
   logmsg("-> cw %8.8x f1l %d f1s %d f2s %d rs %d round %d f1t %d f2l %d scale %d f2t %d\n",
                 cw.w, cw.a,  cw.b,  cw.c,  cw.t, cw.d,    cw.e,  cw.f,  cw.g,    cw.h);
 #endif
 
-  int64_t value = E50X(load_decimal)(cpu, cw, 0);
+  intdec_t value = E50X(load_decimal)(cpu, cw, 0, &far0, &fbr0);
 
   value = dcw_scale(cw, 1, value);
 
-  E50X(store_decimal)(cpu, cw, 1, value);
+  E50X(store_decimal)(cpu, cw, 1, value, &far1, &fbr1);
+
+  S_FAR(cpu, 0, far0);
+  S_FBR(cpu, 0, fbr0);
+  S_FAR(cpu, 1, far1);
+  S_FBR(cpu, 1, fbr1);
 }
 
 
@@ -765,21 +792,21 @@ E50I(xdtb)
 {
 dcw_t cw = {.w = G_L(cpu) };
 
+uint32_t far0 = G_FAR(cpu, 0);
+int fbr0 = G_FBR(cpu, 0);
 #ifdef DEBUG
-uint32_t src = G_FAR(cpu, 0);
-int srb = G_FBR(cpu, 0);
-int srl = G_FLR(cpu, 0);
-uint32_t dst = G_FAR(cpu, 1);
-int dsb = G_FBR(cpu, 1);
-int dsl = G_FLR(cpu, 1);
+uint32_t far1 = G_FAR(cpu, 1);
+int fbr1 = G_FBR(cpu, 1);
+int flr0 = G_FLR(cpu, 0);
+int flr1 = G_FLR(cpu, 1);
 
   logop1(op, "*xdtb");
-  logmsg("-> %8.8x+%x %x %8.8x+%x %x\n", src, srb, srl, dst, dsb, dsl);
+  logmsg("-> %8.8x+%x %x %8.8x+%x %x\n", far0, fbr0, flr0, far1, fbr1, flr1);
   logmsg("-> cw %8.8x f1l %d f1s %d f2s %d rs %d round %d f1t %d f2l %d scale %d f2t %d\n",
                 cw.w, cw.a,  cw.b,  cw.c,  cw.t, cw.d,    cw.e,  cw.f,  cw.g,    cw.h);
 #endif
 
-  int64_t r = E50X(load_decimal)(cpu, cw, 0);
+  intdec_t r = E50X(load_decimal)(cpu, cw, 0, &far0, &fbr0);
 
   switch(cw.h) {
     case 0b00:
@@ -790,6 +817,7 @@ int dsl = G_FLR(cpu, 1);
       break;
     default:
       logall("xdtb h %d invalid\n", cw.h);
+      break;
     case 0b10:
       S_L(cpu, r >> 32);
       S_E(cpu, r & 0xffffffff);
@@ -802,21 +830,21 @@ E50I(xbtd)
 {
 dcw_t cw = {.w = G_L(cpu) };
 
+uint32_t far0 = G_FAR(cpu, 0);
+int fbr0 = G_FBR(cpu, 0);
 #ifdef DEBUG
-uint32_t src = G_FAR(cpu, 0);
-int srb = G_FBR(cpu, 0);
-int srl = G_FLR(cpu, 0);
-uint32_t dst = G_FAR(cpu, 1);
-int dsb = G_FBR(cpu, 1);
-int dsl = G_FLR(cpu, 1);
+int flr0 = G_FLR(cpu, 0);
+uint32_t far1 = G_FAR(cpu, 1);
+int fbr1 = G_FBR(cpu, 1);
+int flr1 = G_FLR(cpu, 1);
 
   logop1(op, "*xbtd");
-  logmsg("-> %8.8x+%x %x %8.8x+%x %x\n", src, srb, srl, dst, dsb, dsl);
+  logmsg("-> %8.8x+%x %x %8.8x+%x %x\n", far0, fbr0, flr0, far1, fbr1, flr1);
   logmsg("-> cw %8.8x f1l %d f1s %d f2s %d rs %d round %d f1t %d f2l %d scale %d f2t %d\n",
                 cw.w, cw.a,  cw.b,  cw.c,  cw.t, cw.d,    cw.e,  cw.f,  cw.g,    cw.h);
 #endif
 
-  int64_t r;
+  intdec_t r;
 
   switch(cw.h) {
     case 0b00:
@@ -832,7 +860,10 @@ int dsl = G_FLR(cpu, 1);
       break;
   }
 
-  E50X(store_decimal)(cpu, cw, 0, r);
+  E50X(store_decimal)(cpu, cw, 0, r, &far0, &fbr0);
+
+  S_FAR(cpu, 0, far0);
+  S_FBR(cpu, 0, fbr0);
 }
 
 
@@ -840,32 +871,33 @@ E50I(xed)
 {
 uint32_t spa = G_XB(cpu);
 uint16_t sp;
-xed_iv iv = { .sc = cpu->crs->km.ascii ? 040: 0240, .fc = 0, .sp = 0, .sign = 0, .sig = 0 };
+xed_iv iv = { 0 };
+xed_get_iv(cpu, &iv);
+iv.sc = cpu->crs->km.ascii ? 040: 0240;
 
+uint32_t far0 = G_FAR(cpu, 0);
+uint32_t far1 = G_FAR(cpu, 1);
+int fbr0 = G_FBR(cpu, 0);
+int fbr1 = G_FBR(cpu, 1);
 #ifdef DEBUG
 dcw_t cw = {.w = G_L(cpu) };
-uint32_t far0 = G_FAR(cpu, 0);
-int srb = G_FBR(cpu, 0);
-int srl = G_FLR(cpu, 0);
-uint32_t far1 = G_FAR(cpu, 1);
-int dsb = G_FBR(cpu, 1);
-int dsl = G_FLR(cpu, 1);
+int flr0 = G_FLR(cpu, 0);
+int flr1 = G_FLR(cpu, 1);
 
   logop1(op, "*xed");
-  logmsg("-> %8.8x+%x %x %8.8x+%x %x\n", far0, srb, srl, far1, dsb, dsl);
+  logmsg("-> %8.8x+%x %x %8.8x+%x %x\n", far0, fbr0, flr0, far1, fbr1, flr1);
   logmsg("-> cw %8.8x f1l %d f1s %d f2s %d rs %d round %d f1t %d f2l %d scale %d f2t %d\n",
                 cw.w, cw.a,  cw.b,  cw.c,  cw.t, cw.d,    cw.e,  cw.f,  cw.g,    cw.h);
 #endif
 
-  logmsg("todo\n");
-
   uint8_t s;
-  E50X(load_bytes)(cpu, &s, 0, 1, update);
+  E50X(load_bytes)(cpu, &s, 1, &far0, &fbr0);
   if((s & 0x7f) == '-')
     iv.sign = 1;
 
   do {
-    sp = E50X(vfetch_w)(cpu, spa++);
+    sp = E50X(vfetch_w)(cpu, spa);
+    inc_d(&spa);
     int op = (sp >> 8) & 037;
     uint8_t m = sp & 0377;
 
@@ -873,25 +905,25 @@ int dsl = G_FLR(cpu, 1);
 
     switch(op) {
       case XED_ZS:
-        E50X(xed_zs)(cpu, &iv, &spa, m);
+        E50X(xed_zs)(cpu, &iv, &spa, m, &far0, &fbr0, &far1, &fbr1);
         break;
       case XED_IL:
-        E50X(xed_il)(cpu, &iv, &spa, m);
+        E50X(xed_il)(cpu, &iv, &spa, m, &far1, &fbr1);
         break;
       case XED_SS:
         E50X(xed_ss)(cpu, &iv, &spa, m);
         break;
       case XED_ICS:
-        E50X(xed_ics)(cpu, &iv, &spa, m);
+        E50X(xed_ics)(cpu, &iv, &spa, m, &far1, &fbr1);
         break;
       case XED_ID:
-        E50X(xed_id)(cpu, &iv, &spa, m);
+        E50X(xed_id)(cpu, &iv, &spa, m, &far0, &fbr0, &far1, &fbr1);
         break;
       case XED_ICM:
-        E50X(xed_icm)(cpu, &iv, &spa, m);
+        E50X(xed_icm)(cpu, &iv, &spa, m, &far1, &fbr1);
         break;
       case XED_ICP:
-        E50X(xed_icp)(cpu, &iv, &spa, m);
+        E50X(xed_icp)(cpu, &iv, &spa, m, &far1, &fbr1);
         break;
       case XED_SFC:
         E50X(xed_sfc)(cpu, &iv, &spa, m);
@@ -909,26 +941,28 @@ int dsl = G_FLR(cpu, 1);
         E50X(xed_jz)(cpu, &iv, &spa, m);
         break;
       case XED_FS:
-        E50X(xed_fs)(cpu, &iv, &spa, m);
+        E50X(xed_fs)(cpu, &iv, &spa, m, &far1, &fbr1);
         break;
       case XED_SF:
-        E50X(xed_sf)(cpu, &iv, &spa, m);
+        E50X(xed_sf)(cpu, &iv, &spa, m, &far1, &fbr1);
         break;
       case XED_IS:
-        E50X(xed_is)(cpu, &iv, &spa, m);
+        E50X(xed_is)(cpu, &iv, &spa, m, &far1, &fbr1);
         break;
       case XED_SD:
-        E50X(xed_sd)(cpu, &iv, &spa, m);
+        E50X(xed_sd)(cpu, &iv, &spa, m, &far0, &fbr0, &far1, &fbr1);
         break;
       case XED_EBS:
-        E50X(xed_ebs)(cpu, &iv, &spa, m);
+        E50X(xed_ebs)(cpu, &iv, &spa, m, &far0, &fbr0, &far1, &fbr1);
         break;
       default:;
     }
 
     S_XB(cpu, spa);
+    xed_set_iv(cpu, &iv);
 
   } while(!(sp & 0x8000));
+
 }
 
 
@@ -936,30 +970,37 @@ E50I(xad)
 {
 dcw_t cw = {.w = G_L(cpu) };
 
+uint32_t far0 = G_FAR(cpu, 0);
+uint32_t far1 = G_FAR(cpu, 1);
+int fbr0 = G_FBR(cpu, 0);
+int fbr1 = G_FBR(cpu, 1);
 #ifdef DEBUG
-uint32_t src = G_FAR(cpu, 0);
-int srb = G_FBR(cpu, 0);
-int srl = G_FLR(cpu, 0);
-uint32_t dst = G_FAR(cpu, 1);
-int dsb = G_FBR(cpu, 1);
-int dsl = G_FLR(cpu, 1);
+int flr0 = G_FLR(cpu, 0);
+int flr1 = G_FLR(cpu, 1);
 
   logop1(op, "*xad");
-  logmsg("-> %8.8x+%x %x %8.8x+%x %x\n", src, srb, srl, dst, dsb, dsl);
+  logmsg("-> %8.8x+%x %x %8.8x+%x %x\n", far0, fbr0, flr0, far1, fbr1, flr1);
   logmsg("-> cw %8.8x f1l %d f1s %d f2s %d rs %d round %d f1t %d f2l %d scale %d f2t %d\n",
                 cw.w, cw.a,  cw.b,  cw.c,  cw.t, cw.d,    cw.e,  cw.f,  cw.g,    cw.h);
 #endif
 
-  int64_t v1 = E50X(load_decimal)(cpu, cw, 0);
-  int64_t v2 = E50X(load_decimal)(cpu, cw, 1);
+  intdec_t v1 = E50X(load_decimal)(cpu, cw, 0, &far0, &fbr0);
+  uint32_t farx = far1;
+  int fbrx = fbr1;
+  intdec_t v2 = E50X(load_decimal)(cpu, cw, 1, &farx, &fbrx);
 
-logmsg("xad v1 %jd v2 %jd\n", (intmax_t)v1, (intmax_t)v2);
   v1 = dcw_scale(cw, 0, v1);
 
-  int64_t r = v1 + v2;
+#if 0
+  if(cw.b)
+    v1 = pow(10, cw.a) + v1;
+#endif
 
-logmsg("xad v1 %jd v2 %jd r %jd\n", (intmax_t)v1, (intmax_t)v2, (intmax_t)r);
-  E50X(store_decimal)(cpu, cw, 1, r);
+  intdec_t r = v1 + v2;
+
+  E50X(store_decimal)(cpu, cw, 1, r, &far1, &fbr1);
+
+  SET_CC(cpu, r);
 }
 
 
@@ -967,22 +1008,22 @@ E50I(xcm)
 {
 dcw_t cw = {.w = G_L(cpu) };
 
+uint32_t far0 = G_FAR(cpu, 0);
+uint32_t far1 = G_FAR(cpu, 1);
+int fbr0 = G_FBR(cpu, 0);
+int fbr1 = G_FBR(cpu, 1);
 #ifdef DEBUG
-uint32_t src = G_FAR(cpu, 0);
-int srb = G_FBR(cpu, 0);
-int srl = G_FLR(cpu, 0);
-uint32_t dst = G_FAR(cpu, 1);
-int dsb = G_FBR(cpu, 1);
-int dsl = G_FLR(cpu, 1);
+int flr0 = G_FLR(cpu, 0);
+int flr1 = G_FLR(cpu, 1);
 
   logop1(op, "*xcm");
-  logmsg("-> %8.8x+%x %x %8.8x+%x %x\n", src, srb, srl, dst, dsb, dsl);
+  logmsg("-> %8.8x+%x %x %8.8x+%x %x\n", far0, fbr0, flr0, far1, fbr1, flr1);
   logmsg("-> cw %8.8x f1l %d f1s %d f2s %d rs %d round %d f1t %d f2l %d scale %d f2t %d\n",
                 cw.w, cw.a,  cw.b,  cw.c,  cw.t, cw.d,    cw.e,  cw.f,  cw.g,    cw.h);
 #endif
 
-  int64_t v1 = E50X(load_decimal)(cpu, cw, 0);
-  int64_t v2 = E50X(load_decimal)(cpu, cw, 1);
+  intdec_t v1 = E50X(load_decimal)(cpu, cw, 0, &far0, &fbr0);
+  intdec_t v2 = E50X(load_decimal)(cpu, cw, 1, &far1, &fbr1);
 
   if(v2 != 0)
     v1 = dcw_scale(cw, 1, v1);
@@ -995,29 +1036,69 @@ E50I(xdv)
 {
 dcw_t cw = {.w = G_L(cpu) };
 
+uint32_t far0 = G_FAR(cpu, 0);
+uint32_t far1 = G_FAR(cpu, 1);
+int fbr0 = G_FBR(cpu, 0);
+int fbr1 = G_FBR(cpu, 1);
 #ifdef DEBUG
-uint32_t src = G_FAR(cpu, 0);
-int srb = G_FBR(cpu, 0);
-int srl = G_FLR(cpu, 0);
-uint32_t dst = G_FAR(cpu, 1);
-int dsb = G_FBR(cpu, 1);
-int dsl = G_FLR(cpu, 1);
+int flr0 = G_FLR(cpu, 0);
+int flr1 = G_FLR(cpu, 1);
 
   logop1(op, "*xdv");
-  logmsg("-> %8.8x+%x %x %8.8x+%x %x\n", src, srb, srl, dst, dsb, dsl);
+  logmsg("-> far0: %8.8x flr %8.8x fbr %d\n", G_FAR(cpu, 0), G_FLR(cpu, 0), G_FBR(cpu, 0));
+  logmsg("-> far1: %8.8x flr %8.8x fbr %d\n", G_FAR(cpu, 1), G_FLR(cpu, 1), G_FBR(cpu, 1));
+  logmsg("-> %8.8x+%x %x %8.8x+%x %x\n", far0, fbr0, flr0, far1, fbr1, flr1);
   logmsg("-> cw %8.8x f1l %d f1s %d f2s %d rs %d round %d f1t %d f2l %d scale %d f2t %d\n",
                 cw.w, cw.a,  cw.b,  cw.c,  cw.t, cw.d,    cw.e,  cw.f,  cw.g,    cw.h);
 #endif
 
-  int64_t value = E50X(load_decimal)(cpu, cw, 0);
+//__int128_t div = E50X(load_decimal)(cpu, cw, 0);
+  intdec_t div = E50X(load_decimal)(cpu, cw, 0, &far0, &fbr0);
 
-  value = dcw_scale(cw, 0, value);
+  div = dcw_scale(cw, 0, div);
 
-  int div = E50X(load_decimal)(cpu, cw, 1);
-  if(div) // TODO
-    value /= div;
+  if(!div) // TODO
+    return;
 
-  E50X(store_decimal)(cpu, cw, 1, value);
+  uint32_t farx = far1;
+  int fbrx = fbr1;
+  intdec_t value = E50X(load_decimal)(cpu, cw, 1, &farx, &fbrx);
+
+  int ql, rl;
+  if(cw.a < cw.f)
+  {
+    ql = cw.f - cw.a;
+    rl = cw.a;
+  }
+  else
+  {
+    ql = cw.f;
+    rl = 0;
+  }
+  
+
+  intdec_t quotient = value / div;
+
+  cw.f = ql;
+  E50X(store_decimal)(cpu, cw, 1, quotient, &far1, &fbr1);
+
+#if 0
+  far1 += cw.f / 2;
+//S_FAR(cpu, 1, far1);
+  if((cw.f % 2))
+    fbr1 = fbr1 ? 0 : 8;
+//S_FBR(cpu, 1, fbr1);
+#endif
+
+  intdec_t remainder = value % div;
+
+  if(rl)
+  {
+    cw.f = rl;
+    E50X(store_decimal)(cpu, cw, 1, remainder, &far1, &fbr1);
+  }
+
+logmsg("val %jd, div %jd, qnt %jd, rem %jd\n", (intmax_t)value, (intmax_t)div, (intmax_t)quotient, (intmax_t)remainder);
 }
 
 
@@ -1025,27 +1106,32 @@ E50I(xmp)
 {
 dcw_t cw = {.w = G_L(cpu) };
 
+uint32_t far0 = G_FAR(cpu, 0);
+uint32_t far1 = G_FAR(cpu, 1);
+int fbr0 = G_FBR(cpu, 0);
+int fbr1 = G_FBR(cpu, 1);
 #ifdef DEBUG
-uint32_t src = G_FAR(cpu, 0);
-uint32_t dst = G_FAR(cpu, 1);
-int srb = G_FBR(cpu, 0);
-int dsl = G_FLR(cpu, 1);
-int srl = G_FLR(cpu, 0);
-int dsb = G_FBR(cpu, 1);
+int flr0 = G_FLR(cpu, 0);
+int flr1 = G_FLR(cpu, 1);
 
   logop1(op, "*xmp");
-  logmsg("-> %8.8x+%x %x %8.8x+%x %x\n", src, srb, srl, dst, dsb, dsl);
+  logmsg("-> %8.8x+%x %x %8.8x+%x %x\n", far0, fbr0, flr0, far1, fbr1, flr1);
   logmsg("-> cw %8.8x f1l %d f1s %d f2s %d rs %d round %d f1t %d f2l %d scale %d f2t %d\n",
                 cw.w, cw.a,  cw.b,  cw.c,  cw.t, cw.d,    cw.e,  cw.f,  cw.g,    cw.h);
 #endif
 
-  int64_t value = E50X(load_decimal)(cpu, cw, 0);
+  intdec_t value = E50X(load_decimal)(cpu, cw, 0, &far0, &fbr0);
 
-  value = dcw_scale(cw, 0, value);
+//value = dcw_scale(cw, 0, value);
 
-  value *= E50X(load_decimal)(cpu, cw, 1);
+  uint32_t farx = far1;
+  int fbrx = fbr1;
+  intdec_t multiplier = E50X(load_decimal)(cpu, cw, 1, &farx, &fbrx);
 
-  E50X(store_decimal)(cpu, cw, 1, value);
+  intdec_t result = value * multiplier;
+
+  E50X(store_decimal)(cpu, cw, 1, result, &far1, &fbr1);
+logmsg("val %jd, mul %jd, res %jd\n", (intmax_t)value, (intmax_t)multiplier, (intmax_t)result);
 }
 
 

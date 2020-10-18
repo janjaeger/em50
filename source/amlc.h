@@ -88,8 +88,7 @@ typedef struct amlc_t {
   uint16_t id;  
   uint16_t va;
   uint16_t ca;
-#define AMLC_DC_DMC 0x800
-#define AMLC_DC_CHA 0x7FF
+  uint16_t c1;
   uint16_t da;
   uint16_t cl;
   uint16_t st;
@@ -100,19 +99,19 @@ typedef struct amlc_t {
 #define AMLC_ST_CTI1 0x0080   // Character Time Interrupt 1
 #define AMLC_ST_CTI2 0x0040   // Character Time Interrupt 2
 #define AMLC_ST_IENA 0x0020   // Interrupts Enabled
-#define AMLC_ST_DIAG 0x0010   // Diagnostic Mode
+#define AMLC_ST_DMQ  0x0010   // DMQ Mode
 #define AMLC_ST_LINE 0x000F   // CTI Line number
   int ra;
   int im;
   int dm;
   int dv;
-int x; // last line to CTI
   line_t ln[AMLC_LINES];
   struct {
     pthread_t tid;
     pthread_attr_t attr;
     pthread_mutex_t mutex;
   } pthread;
+  int in;
 } amlc_t;
 
 int amlc_io(cpu_t *cpu, int, int, int, int, void **, int, char *[]);

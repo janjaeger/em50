@@ -42,113 +42,90 @@
 #endif
 
 
-#ifndef _char_c
-#define _char_c
-
-static uint32_t ainc(uint32_t *a)
+static inline uint8_t E50X(load_byte)(cpu_t *cpu, uint32_t *far0, int *fbr0, int *flr0)
 {
-dw_t *w = (dw_t *)a;
-  ++w->l;
-  return w->w;
-}
-
-#endif
-
-
-static inline uint8_t E50X(load_byte)(cpu_t *cpu)
-{
-uint32_t far0 = G_FAR(cpu, 0);
-int fbr0 = G_FBR(cpu, 0);
-int flr0 = G_FLR(cpu, 0);
-
-uint16_t w = E50X(vfetch_w)(cpu, far0);
+uint16_t w = E50X(vfetch_w)(cpu, *far0);
 
 uint8_t r;
 
-  if(fbr0)
+  if(*fbr0)
   {
     r = w & 0xff;
-    fbr0 = 0;
+    *fbr0 = 0;
   }
   else
   {
     r = w >> 8;
-    fbr0 = 8;
+    *fbr0 = 8;
   }
 
-  S_FBR(cpu, 0, fbr0);
-  if(!fbr0)
-    S_FAR(cpu, 0, ++far0);
-  S_FLR(cpu, 0, --flr0);
+  if(!(*fbr0))
+    inc_d(far0);
+  --(*flr0);
 
   return r;
 }
 
-static inline void E50X(store_byte)(cpu_t *cpu, uint8_t b)
+static inline void E50X(store_byte)(cpu_t *cpu, uint8_t b, uint32_t *far1, int *fbr1)
 {
-uint32_t far1 = G_FAR(cpu, 1);
-int fbr1 = G_FBR(cpu, 1);
+uint16_t w = E50X(vfetch_w)(cpu, *far1);
 
-uint16_t w = E50X(vfetch_w)(cpu, far1);
-
-  if(fbr1)
+  if(*fbr1)
   {
     w &= 0xff00;
     w |= b;
-    fbr1 = 0;
+    *fbr1 = 0;
   }
   else
   {
     w &= 0x00ff;
     w |= b << 8;
-    fbr1 = 8;
+    *fbr1 = 8;
   }
 
-  E50X(vstore_w)(cpu, far1, w);
-  S_FBR(cpu, 1, fbr1);
-  if(!fbr1)
-    S_FAR(cpu, 1, ++far1);
+  E50X(vstore_w)(cpu, *far1, w);
+
+  if(!(*fbr1))
+    inc_d(far1);
 }
 
 #define ZED_CPC 0b00
-static inline void E50X(zed_cpc)(cpu_t *cpu, uint8_t m)
+static inline void E50X(zed_cpc)(cpu_t *cpu, uint8_t m, uint32_t *far0, int *fbr0, int *flr0, uint32_t *far1, int *fbr1)
 {
-int flr0 = G_FLR(cpu, 0);
 uint8_t c = cpu->crs->km.ascii ? 040: 0240;
-int count = flr0 < m ? flr0 : m;
+int count = *flr0 < m ? *flr0 : m;
 int n = 0;
 
   for(; n < count; ++n)
-    E50X(store_byte)(cpu, E50X(load_byte)(cpu));
+    E50X(store_byte)(cpu, E50X(load_byte)(cpu, far0, fbr0, flr0), far1, fbr1);
 
   for(; n < m; ++n)
-    E50X(store_byte)(cpu, c);
+    E50X(store_byte)(cpu, c, far1, fbr1);
 }
 
 #define ZED_INL 0b01
-static inline void E50X(zed_inl)(cpu_t *cpu, uint8_t m)
+static inline void E50X(zed_inl)(cpu_t *cpu, uint8_t m, uint32_t *far1, int *flr1)
 {
-  E50X(store_byte)(cpu, m);
+  E50X(store_byte)(cpu, m, far1, flr1);
 }
 
 #define ZED_SKC 0b10
-static inline void E50X(zed_skc)(cpu_t *cpu, uint8_t m)
+static inline void E50X(zed_skc)(cpu_t *cpu, uint8_t m, uint32_t *far0, int *fbr0, int *flr0)
 {
-int flr0 = G_FLR(cpu, 0);
-int count = flr0 < m ? flr0 : m;
+int count = *flr0 < m ? *flr0 : m;
 int n = 0;
 
   for(; n < count; ++n)
-    E50X(load_byte)(cpu);
+    E50X(load_byte)(cpu, far0, fbr0, flr0);
 }
 
 #define ZED_BLK 0b11
-static inline void E50X(zed_blk)(cpu_t *cpu, uint8_t m)
+static inline void E50X(zed_blk)(cpu_t *cpu, uint8_t m, uint32_t *far1, int *fbr1)
 {
 uint8_t c = cpu->crs->km.ascii ? 040: 0240;
 
   for(int i = 0; i < m; ++i)
-    E50X(store_byte)(cpu, c);
+    E50X(store_byte)(cpu, c, far1, fbr1);
 }
 
 
@@ -163,8 +140,8 @@ static inline void E50X(move)(cpu_t *cpu, uint32_t src, int srb, int srl, uint32
     if(dsb == 0 && srb == 0 && dsl > 1 && srl > 1)
     {
       E50X(vstore_w)(cpu, dst, w);
-      ainc(&src);
-      ainc(&dst);
+      inc_d(&src);
+      inc_d(&dst);
       srl -= 2;
       dsl -= 2;
     }
@@ -173,8 +150,8 @@ static inline void E50X(move)(cpu_t *cpu, uint32_t src, int srb, int srl, uint32
       uint16_t t = E50X(vfetch_w)(cpu, dst);
       t = (t & 0xff00) | (w & 0x00ff);
       E50X(vstore_w)(cpu, dst, t);
-      ainc(&src); srb = 0;
-      ainc(&dst); dsb = 0;
+      inc_d(&src); srb = 0;
+      inc_d(&dst); dsb = 0;
       --srl;
       --dsl;
     }
@@ -184,7 +161,7 @@ static inline void E50X(move)(cpu_t *cpu, uint32_t src, int srb, int srl, uint32
       t = (t & 0xff00) | (w >> 8);
       E50X(vstore_w)(cpu, dst, t);
       srb = 8;
-      ainc(&dst); dsb = 0;
+      inc_d(&dst); dsb = 0;
       --srl;
       --dsl;
     }
@@ -193,7 +170,7 @@ static inline void E50X(move)(cpu_t *cpu, uint32_t src, int srb, int srl, uint32
       uint16_t t = E50X(vfetch_w)(cpu, dst);
       t = (t & 0x00ff) | (w << 8);
       E50X(vstore_w)(cpu, dst, t);
-      ainc(&src); srb = 0;
+      inc_d(&src); srb = 0;
       dsb = 8;
       --srl;
       --dsl;
@@ -217,7 +194,7 @@ static inline void E50X(move)(cpu_t *cpu, uint32_t src, int srb, int srl, uint32
     if(dsb == 0 && dsl > 1)
     {
       E50X(vstore_w)(cpu, dst, w);
-      ainc(&dst);
+      inc_d(&dst);
       dsl -= 2;
     }
     else if(dsb != 0)
@@ -225,7 +202,7 @@ static inline void E50X(move)(cpu_t *cpu, uint32_t src, int srb, int srl, uint32
       uint16_t t = E50X(vfetch_w)(cpu, dst);
       t = (t & 0xff00) | (w & 0x00ff);
       E50X(vstore_w)(cpu, dst, t);
-      ainc(&dst); dsb = 0;
+      inc_d(&dst); dsb = 0;
       --dsl;
     }
     else /* dsl == 1 */
@@ -237,12 +214,13 @@ static inline void E50X(move)(cpu_t *cpu, uint32_t src, int srb, int srl, uint32
       --dsl;
     }
   }
-//S_FAR(cpu, 0, src);
-//S_FLR(cpu, 0, srl);
-//S_FBR(cpu, 0, srb);
-//S_FAR(cpu, 1, dst);
-//S_FLR(cpu, 1, dsl);
-//S_FBR(cpu, 1, dsb);
+
+  S_FAR(cpu, 0, src);
+  S_FBR(cpu, 0, srb);
+  S_FLR(cpu, 0, srl);
+  S_FAR(cpu, 1, dst);
+  S_FBR(cpu, 1, dsb);
+  S_FLR(cpu, 1, dsl);
 }
 
 static inline void E50X(compare)(cpu_t *cpu, uint32_t src, int srb, int srl, uint32_t dst, int dsb, int dsl)
@@ -257,8 +235,8 @@ static inline void E50X(compare)(cpu_t *cpu, uint32_t src, int srb, int srl, uin
     if(dsb == 0 && srb == 0 && dsl > 1 && srl > 1)
     {
       t = E50X(vfetch_w)(cpu, dst);
-      ainc(&src);
-      ainc(&dst);
+      inc_d(&src);
+      inc_d(&dst);
       srl -= 2;
       dsl -= 2;
     }
@@ -267,8 +245,8 @@ static inline void E50X(compare)(cpu_t *cpu, uint32_t src, int srb, int srl, uin
       w &= 0x00ff;
       t = E50X(vfetch_w)(cpu, dst);
       t &= 0x00ff;
-      ainc(&src); srb = 0;
-      ainc(&dst); dsb = 0;
+      inc_d(&src); srb = 0;
+      inc_d(&dst); dsb = 0;
       --srl;
       --dsl;
     }
@@ -278,7 +256,7 @@ static inline void E50X(compare)(cpu_t *cpu, uint32_t src, int srb, int srl, uin
       t = E50X(vfetch_w)(cpu, dst);
       t &= 0x00ff;
       srb = 8;
-      ainc(&dst); dsb = 0;
+      inc_d(&dst); dsb = 0;
       --srl;
       --dsl;
     }
@@ -287,7 +265,7 @@ static inline void E50X(compare)(cpu_t *cpu, uint32_t src, int srb, int srl, uin
       w &= 0x00ff;
       t = E50X(vfetch_w)(cpu, dst);
       t >>= 8;
-      ainc(&src); srb = 0;
+      inc_d(&src); srb = 0;
       dsb = 8;
       --srl;
       --dsl;
@@ -305,6 +283,22 @@ static inline void E50X(compare)(cpu_t *cpu, uint32_t src, int srb, int srl, uin
 
     if(w != t)
     {
+      if((w & 0xff00) == (t & 0xff00))
+      {
+        S_FAR(cpu, 0, src-1);
+        S_FBR(cpu, 0, srb ? 0 : 8);
+        S_FLR(cpu, 0, srl+1);
+        S_FAR(cpu, 1, dst-1);
+        S_FBR(cpu, 1, dsb ? 0 : 8);
+        S_FLR(cpu, 1, dsl+1);
+      }
+      else
+      {
+        S_FAR(cpu, 0, src-2);
+        S_FLR(cpu, 0, srl+2);
+        S_FAR(cpu, 1, dst-2);
+        S_FLR(cpu, 1, dsl+2);
+      }
       cpu->crs->km.eq = 0;
       cpu->crs->km.lt = w < t ? 1 : 0;
       return;
@@ -315,10 +309,14 @@ static inline void E50X(compare)(cpu_t *cpu, uint32_t src, int srb, int srl, uin
   {
     uint16_t t, w = cpu->crs->km.ascii ? 020040: 0120240;
 
+//  S_FAR(cpu, 1, dst);
+//  S_FBR(cpu, 1, dsb);
+//  S_FLR(cpu, 1, dsl);
+
     if(dsb == 0 && dsl > 1)
     {
       t = E50X(vfetch_w)(cpu, dst);
-      ainc(&dst);
+      inc_d(&dst);
       dsl -= 2;
     }
     else if(dsb != 0)
@@ -326,7 +324,7 @@ static inline void E50X(compare)(cpu_t *cpu, uint32_t src, int srb, int srl, uin
       w &= 0x00ff;
       t = E50X(vfetch_w)(cpu, dst);
       t &= 0x00ff;
-      ainc(&dst); dsb = 0;
+      inc_d(&dst); dsb = 0;
       --dsl;
     }
     else /* dsb == 0 && dsl == 1 */
@@ -340,6 +338,17 @@ static inline void E50X(compare)(cpu_t *cpu, uint32_t src, int srb, int srl, uin
 
     if(w != t)
     {
+      if((w & 0xff00) == (t & 0xff00))
+      {
+        S_FAR(cpu, 1, dst-1);
+        S_FBR(cpu, 1, dsb ? 0 : 8);
+        S_FLR(cpu, 1, dsl+1);
+      }
+      else
+      {
+        S_FAR(cpu, 1, dst-2);
+        S_FLR(cpu, 1, dsl+2);
+      }
       cpu->crs->km.eq = 0;
       cpu->crs->km.lt = w < t ? 1 : 0;
       return;
@@ -350,10 +359,14 @@ static inline void E50X(compare)(cpu_t *cpu, uint32_t src, int srb, int srl, uin
   {
     uint16_t w, t = cpu->crs->km.ascii ? 020040: 0120240;
 
+//  S_FAR(cpu, 0, src);
+//  S_FBR(cpu, 0, srb);
+//  S_FLR(cpu, 0, srl);
+
     if(srb == 0 && srl > 1)
     {
       w = E50X(vfetch_w)(cpu, src);
-      ainc(&src);
+      inc_d(&src);
       srl -= 2;
     }
     else if(srb != 0)
@@ -361,7 +374,7 @@ static inline void E50X(compare)(cpu_t *cpu, uint32_t src, int srb, int srl, uin
       t &= 0x00ff;
       w = E50X(vfetch_w)(cpu, src);
       w &= 0x00ff;
-      ainc(&src); srb = 0;
+      inc_d(&src); srb = 0;
       --srl;
     }
     else /* srb == 0 && srl == 1 */
@@ -375,11 +388,29 @@ static inline void E50X(compare)(cpu_t *cpu, uint32_t src, int srb, int srl, uin
 
     if(w != t)
     {
+      if((w & 0xff00) == (t & 0xff00))
+      {
+        S_FAR(cpu, 0, src-1);
+        S_FBR(cpu, 0, srb ? 0 : 8);
+        S_FLR(cpu, 0, srl+1);
+      }
+      else
+      {
+        S_FAR(cpu, 0, src-2);
+        S_FLR(cpu, 0, srl+2);
+      }
       cpu->crs->km.eq = 0;
       cpu->crs->km.lt = w < t ? 1 : 0;
       return;
     }
   }
+
+  S_FAR(cpu, 0, src);
+  S_FBR(cpu, 0, srb);
+  S_FLR(cpu, 0, srl);
+  S_FAR(cpu, 1, dst);
+  S_FBR(cpu, 1, dsb);
+  S_FLR(cpu, 1, dsl);
 }
 
 
@@ -431,8 +462,8 @@ static inline void E50X(translate)(cpu_t *cpu, uint32_t src, int srb, int srl, u
     {
       w = E50X(trtab_w)(cpu, trt, w);
       E50X(vstore_w)(cpu, dst, w);
-      ainc(&src);
-      ainc(&dst);
+      inc_d(&src);
+      inc_d(&dst);
       srl -= 2;
       dsl -= 2;
     }
@@ -442,8 +473,8 @@ static inline void E50X(translate)(cpu_t *cpu, uint32_t src, int srb, int srl, u
       uint16_t t = E50X(vfetch_w)(cpu, dst);
       t = (t & 0xff00) | (w & 0x00ff);
       E50X(vstore_w)(cpu, dst, t);
-      ainc(&src); srb = 0;
-      ainc(&dst); dsb = 0;
+      inc_d(&src); srb = 0;
+      inc_d(&dst); dsb = 0;
       --srl;
       --dsl;
     }
@@ -454,7 +485,7 @@ static inline void E50X(translate)(cpu_t *cpu, uint32_t src, int srb, int srl, u
       t = (t & 0xff00) | (w >> 8);
       E50X(vstore_w)(cpu, dst, t);
       srb = 8;
-      ainc(&dst); dsb = 0;
+      inc_d(&dst); dsb = 0;
       --srl;
       --dsl;
     }
@@ -464,7 +495,7 @@ static inline void E50X(translate)(cpu_t *cpu, uint32_t src, int srb, int srl, u
       uint16_t t = E50X(vfetch_w)(cpu, dst);
       t = (t & 0x00ff) | (w << 8);
       E50X(vstore_w)(cpu, dst, t);
-      ainc(&src); srb = 0;
+      inc_d(&src); srb = 0;
       dsb = 8;
       --srl;
       --dsl;
@@ -504,6 +535,7 @@ int bit = G_FBR(cpu, f);
   if(flr == 0)
   {
     cpu->crs->km.eq = 1;
+    cpu->crs->km.lt = 0;
     return;
   }
 
@@ -516,11 +548,12 @@ int bit = G_FBR(cpu, f);
 
   logmsg("-> char %2.2x '%c'\n", c, isprint(c &0x7f) ? c & 0x7f : '.');
 
-  S_FLR(cpu, f, --flr);
+  --flr;
+  S_FLR(cpu, f, flr);
   if(bit != 0)
   {
     S_FBR(cpu, f, 0);
-    S_FAR(cpu, f, ainc(&far));
+    S_FAR(cpu, f, inc_d(&far));
   }
   else
     S_FBR(cpu, f, 8);
@@ -532,6 +565,7 @@ int bit = G_FBR(cpu, f);
   S_A(cpu, c);
 #endif
   cpu->crs->km.eq = 0;
+  cpu->crs->km.lt = 0;
 }
 #endif
 
@@ -549,6 +583,7 @@ int bit = G_FBR(cpu, f);
   if(flr == 0)
   {
     cpu->crs->km.eq = 1;
+    cpu->crs->km.lt = 0;
     return;
   }
 
@@ -574,17 +609,19 @@ int bit = G_FBR(cpu, f);
   }
   E50X(vstore_w)(cpu, far, c);
 
-  S_FLR(cpu, f, --flr);
+  --flr;
+  S_FLR(cpu, f, flr);
   if(bit != 0)
   {
     S_FBR(cpu, f, 0);
-    S_FAR(cpu, f, ainc(&far));
+    S_FAR(cpu, f, inc_d(&far));
   }
   else
     S_FBR(cpu, f, 8);
 
   logmsg("-> far%d %8.8x flr %8.8x fbr %d\n", f, G_FAR(cpu, f), G_FLR(cpu, f), G_FBR(cpu, f));
   cpu->crs->km.eq = 0;
+  cpu->crs->km.lt = 0;
 }
 
 
@@ -615,7 +652,7 @@ uint16_t c = G_A(cpu) & 0xff;
       E50X(vstore_w)(cpu, far, w);
       --flr;
       bit = 0;
-      ainc(&far);
+      inc_d(&far);
     }
     else
     {
@@ -623,7 +660,7 @@ uint16_t c = G_A(cpu) & 0xff;
       {
         E50X(vstore_w)(cpu, far, c);
         flr -= 2;
-        ainc(&far);
+        inc_d(&far);
       }
       else /* flr == 1 */
       {
@@ -717,10 +754,17 @@ E50I(zed)
 uint32_t spa = G_XB(cpu);
 uint16_t sp;
 
+uint32_t far0 = G_FAR(cpu, 0);
+int fbr0 = G_FBR(cpu, 0);
+int flr0 = G_FLR(cpu, 0);
+uint32_t far1 = G_FAR(cpu, 1);
+int fbr1 = G_FBR(cpu, 1);
+
   logop1(op, "zed");
 
   do {
-    sp = E50X(vfetch_w)(cpu, spa++);
+    sp = E50X(vfetch_w)(cpu, spa);
+    inc_d(&spa);
     int op = (sp >> 8) & 0b11;
     uint8_t m = sp & 0377;
 
@@ -728,21 +772,26 @@ uint16_t sp;
 
     switch(op) {
       case ZED_CPC:
-        E50X(zed_cpc)(cpu, m);
+        E50X(zed_cpc)(cpu, m, &far0, &fbr0, &flr0, &far1, &fbr1);
         break;
       case ZED_INL:
-        E50X(zed_inl)(cpu, m);
+        E50X(zed_inl)(cpu, m, &far1, &fbr1);
         break;
       case ZED_SKC:
-        E50X(zed_skc)(cpu, m);
+        E50X(zed_skc)(cpu, m, &far0, &fbr0, &flr0);
         break;
       case ZED_BLK:
-        E50X(zed_blk)(cpu, m);
+        E50X(zed_blk)(cpu, m, &far1, &fbr1);
         break;
       default:;
     }
 
     S_XB(cpu, spa);
+    S_FAR(cpu, 0, far0);
+    S_FBR(cpu, 0, fbr0);
+    S_FLR(cpu, 0, flr0);
+    S_FAR(cpu, 1, far1);
+    S_FBR(cpu, 1, fbr1);
 
   } while(!(sp & 0x8000));
 }

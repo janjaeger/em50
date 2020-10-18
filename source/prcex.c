@@ -63,8 +63,6 @@ uint32_t ap = E50X(vfetch_iap)(cpu, NULL);
 
   E50X(vstore_w)(cpu, ap, counter);
 
-//cpu->crs->km.ie = 1; // FIXME TODO UNSURE
-
   if(counter >= 0)
     E50X(pxm_notify)(cpu, ap, 1);
 
@@ -87,8 +85,6 @@ uint32_t ap = E50X(vfetch_iap)(cpu, NULL);
   --counter;
 
   E50X(vstore_w)(cpu, ap, counter);
-
-//cpu->crs->km.ie = 1; // FIXME TODO UNSURE
 
   if(counter >= 0)
     E50X(pxm_notify)(cpu, ap, 0);
@@ -136,10 +132,11 @@ uint32_t ap = E50X(vfetch_iap)(cpu, NULL);
 
   E50X(vstore_w)(cpu, ap, counter);
 
-  S_RB(cpu, cpu->srf.mrf.pswpb);
-  S_KEYS(cpu, cpu->srf.mrf.pswkeys.keys); // SHOULD THE MODALS BE RESTORED TOO?
-
   io_clrai(cpu);
+
+  S_RB(cpu, cpu->srf.mrf.pswpb);
+  S_KEYS(cpu, cpu->srf.mrf.pswkeys.keys);
+
   cpu->crs->km.ie = 1;
 
   if(counter >= 0)
@@ -170,7 +167,9 @@ uint32_t ap = E50X(vfetch_iap)(cpu, NULL);
   E50X(vstore_w)(cpu, ap, counter);
 
   S_RB(cpu, cpu->srf.mrf.pswpb);
-  S_KEYS(cpu, cpu->srf.mrf.pswkeys.keys); // SHOULD THE MODALS BE RESTORED TOO?
+  S_KEYS(cpu, cpu->srf.mrf.pswkeys.keys);
+
+  cpu->crs->km.ie = 1;
 
   if(counter >= 0)
     E50X(pxm_notify)(cpu, ap, 0);
@@ -199,10 +198,11 @@ uint32_t ap = E50X(vfetch_iap)(cpu, NULL);
 
   E50X(vstore_w)(cpu, ap, counter);
 
-  S_RB(cpu, cpu->srf.mrf.pswpb);
-  S_KEYS(cpu, cpu->srf.mrf.pswkeys.keys); // SHOULD THE MODALS BE RESTORED TOO?
-
   io_clrai(cpu);
+
+  S_RB(cpu, cpu->srf.mrf.pswpb);
+  S_KEYS(cpu, cpu->srf.mrf.pswkeys.keys);
+
   cpu->crs->km.ie = 1;
 
   if(counter >= 0)
@@ -230,7 +230,9 @@ uint32_t ap = E50X(vfetch_iap)(cpu, NULL);
   E50X(vstore_w)(cpu, ap, counter);
 
   S_RB(cpu, cpu->srf.mrf.pswpb);
-  S_KEYS(cpu, cpu->srf.mrf.pswkeys.keys); // SHOULD THE MODALS BE RESTORED TOO?
+  S_KEYS(cpu, cpu->srf.mrf.pswkeys.keys);
+
+  cpu->crs->km.ie = 1;
 
   if(counter >= 0)
     E50X(pxm_notify)(cpu, ap, 1);

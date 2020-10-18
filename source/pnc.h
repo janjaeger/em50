@@ -80,14 +80,11 @@ typedef struct pnc_t {
   int      im; // Interrupt Mask
   uint16_t rx; // Receive DMA Channel
   uint16_t tx; // Transmit DMA Channel
-#define PNC_DMC      0x0800
-#define PNC_DMC_MASK 0x07ff
-#define PNC_DMA_MASK 0x001f
   uint16_t rs; // Receive Status
 #define PNC_XS_ACK   0x8000
 #define PNC_XS_MACK  0x4000
 #define PNC_XS_WACK  0x2000
-#define PNC_XS_NACK  0x1000
+#define PNC_XS_NACK  0x0400
 #define PNC_XS_PERR  0x0200
 #define PNC_XS_CERR  0x0100
 #define PNC_RS_EOR   0x0080
@@ -100,6 +97,7 @@ typedef struct pnc_t {
 #define PNC_TS_CERR  0x0010
 #define PNC_TS_RERR  0x0008
 #define PNC_TS_RMASK 0x0007
+  uint16_t dr; // Diagnostic Register
 
   struct intr_t intrx;
   struct intr_t inttx;

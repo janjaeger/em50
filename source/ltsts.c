@@ -38,6 +38,7 @@
 E50I(lf)
 {
   logop1(op, "lf");
+
 #ifdef I_MODE
   int dr = op_dr(op);
   S_RH(cpu, dr, 0);
@@ -62,91 +63,163 @@ E50I(lt)
 
 E50I(leq)
 {
-int16_t a = (int16_t)G_A(cpu);
-
   logop1(op, "leq");
   
+#ifdef I_MODE
+  int dr = op_dr(op);
+  int32_t r = G_R(cpu, dr);
+
+  SET_CC(cpu, r);
+
+  if(CC_EQ(cpu))
+    S_RH(cpu, dr, 1);
+  else
+    S_RH(cpu, dr, 0);
+#else
+  int16_t a = (int16_t)G_A(cpu);
+
   SET_CC(cpu, a);
 
   if(CC_EQ(cpu))
     S_A(cpu, 1);
   else
     S_A(cpu, 0);
+#endif
 }
 
 
 E50I(lne)
 {
-int16_t a = (int16_t)G_A(cpu);
-
   logop1(op, "lne");
   
+#ifdef I_MODE
+  int dr = op_dr(op);
+  int32_t r = G_R(cpu, dr);
+
+  SET_CC(cpu, r);
+
+  if(CC_NE(cpu))
+    S_RH(cpu, dr, 1);
+  else
+    S_RH(cpu, dr, 0);
+#else
+  int16_t a = (int16_t)G_A(cpu);
+
   SET_CC(cpu, a);
 
   if(CC_NE(cpu))
     S_A(cpu, 1);
   else
     S_A(cpu, 0);
+#endif
 }
 
 
 E50I(lle)
 {
-int16_t a = (int16_t)G_A(cpu);
-
   logop1(op, "lle");
   
+#ifdef I_MODE
+  int dr = op_dr(op);
+  int32_t r = G_R(cpu, dr);
+
+  SET_CC(cpu, r);
+
+  if(CC_LE(cpu))
+    S_RH(cpu, dr, 1);
+  else
+    S_RH(cpu, dr, 0);
+#else
+int16_t a = (int16_t)G_A(cpu);
+
   SET_CC(cpu, a);
 
   if(CC_LE(cpu))
     S_A(cpu, 1);
   else
     S_A(cpu, 0);
+#endif
 }
 
 
 E50I(lge)
 {
-int16_t a = (int16_t)G_A(cpu);
-
   logop1(op, "lge");
   
+#ifdef I_MODE
+  int dr = op_dr(op);
+  int32_t r = G_R(cpu, dr);
+
+  SET_CC(cpu, r);
+
+  if(CC_GE(cpu))
+    S_RH(cpu, dr, 1);
+  else
+    S_RH(cpu, dr, 0);
+#else
+  int16_t a = (int16_t)G_A(cpu);
+
   SET_CC(cpu, a);
 
   if(CC_GE(cpu))
     S_A(cpu, 1);
   else
     S_A(cpu, 0);
+#endif
 }
 
 
 E50I(lgt)
 {
-int16_t a = (int16_t)G_A(cpu);
-
   logop1(op, "lgt");
   
+#ifdef I_MODE
+  int dr = op_dr(op);
+  int32_t r = G_R(cpu, dr);
+
+  SET_CC(cpu, r);
+
+  if(CC_GT(cpu))
+    S_RH(cpu, dr, 1);
+  else
+    S_RH(cpu, dr, 0);
+#else
+  int16_t a = (int16_t)G_A(cpu);
+
   SET_CC(cpu, a);
 
   if(CC_GT(cpu))
     S_A(cpu, 1);
   else
     S_A(cpu, 0);
+#endif
 }
 
 
 E50I(llt)
 {
-int16_t a = (int16_t)G_A(cpu);
-
   logop1(op, "llt");
   
+#ifdef I_MODE
+  int dr = op_dr(op);
+  int32_t r = G_R(cpu, dr);
+
+  SET_CC(cpu, r);
+
+  if(CC_LT(cpu))
+    S_RH(cpu, dr, 1);
+  else
+    S_RH(cpu, dr, 0);
+#else
+  int16_t a = (int16_t)G_A(cpu);
+
   SET_CC(cpu, a);
 
   if(CC_LT(cpu))
     S_A(cpu, 1);
   else
     S_A(cpu, 0);
+#endif
 }
 
 
@@ -243,66 +316,120 @@ int32_t l = (int32_t)G_L(cpu);
 E50I(lceq)
 {
   logop1(op, "lceq");
-  
+
+#ifdef I_MODE
+  int dr = op_dr(op);
+
+  if(CC_EQ(cpu))
+    S_RH(cpu, dr, 1);
+  else
+    S_RH(cpu, dr, 0);
+#else
   if(CC_EQ(cpu))
     S_A(cpu, 1);
   else
     S_A(cpu, 0);
+#endif
 }
 
 
 E50I(lcne)
 {
   logop1(op, "lcne");
-  
+
+#ifdef I_MODE
+  int dr = op_dr(op);
+
+  if(CC_NE(cpu))
+    S_RH(cpu, dr, 1);
+  else
+    S_RH(cpu, dr, 0);
+#else
   if(CC_NE(cpu))
     S_A(cpu, 1);
   else
     S_A(cpu, 0);
+#endif
 }
 
 
 E50I(lcge)
 {
   logop1(op, "lcge");
-  
+
+#ifdef I_MODE
+  int dr = op_dr(op);
+
+  if(CC_GE(cpu))
+    S_RH(cpu, dr, 1);
+  else
+    S_RH(cpu, dr, 0);
+#else
   if(CC_GE(cpu))
     S_A(cpu, 1);
   else
     S_A(cpu, 0);
+#endif
 }
 
 
 E50I(lcgt)
 {
   logop1(op, "lcgt");
-  
+
+#ifdef I_MODE
+  int dr = op_dr(op);
+
+  if(CC_GT(cpu))
+    S_RH(cpu, dr, 1);
+  else
+    S_RH(cpu, dr, 0);
+#else
   if(CC_GT(cpu))
     S_A(cpu, 1);
   else
     S_A(cpu, 0);
+#endif
 }
 
 
 E50I(lcle)
 {
   logop1(op, "lcle");
-  
+
+#ifdef I_MODE
+  int dr = op_dr(op);
+
+  if(CC_LE(cpu))
+    S_RH(cpu, dr, 1);
+  else
+    S_RH(cpu, dr, 0);
+#else
   if(CC_LE(cpu))
     S_A(cpu, 1);
   else
     S_A(cpu, 0);
+#endif
 }
 
 
 E50I(lclt)
 {
   logop1(op, "lclt");
-  
+
+#ifdef I_MODE
+  int dr = op_dr(op);
+
+  if(CC_LT(cpu))
+    S_RH(cpu, dr, 1);
+  else
+    S_RH(cpu, dr, 0);
+#else
   if(CC_LT(cpu))
     S_A(cpu, 1);
   else
     S_A(cpu, 0);
+#endif
 }
 
 

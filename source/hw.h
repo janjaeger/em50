@@ -100,7 +100,7 @@ typedef struct sw_t {
 typedef struct dw_t {
   union {
     struct {
-      uint32_t w;
+      uint32_t d;
     };
     struct {
       uint16_t l; // little endian
@@ -109,7 +109,7 @@ typedef struct dw_t {
   };
 } __attribute__ ((packed)) dw_t;
 
-typedef struct dq_t {
+typedef struct qw_t {
   union {
     struct {
       uint64_t q;
@@ -119,7 +119,7 @@ typedef struct dq_t {
       uint32_t h;
     };
   };
-} __attribute__ ((packed)) dq_t;
+} __attribute__ ((packed)) qw_t;
 
 typedef struct gr_t {
   union {
@@ -262,7 +262,7 @@ typedef uint32_t phys_t; // Physical Address
 #define hmap_u   0x4000     // Page Used (Set to 1 by hw)
 #define hmap_m   0x2000     // Page unModified (Set to 0 by hw)
 #define hmap_s   0x1000     // Page Shared
-#define hmap_phy 0x0fff     // Physical Page Number (sw use only)
+#define hmap_phy 0x0fff     // Physical Page Number
 
 
 #define pmt_r    0x80000000 // Page Resident
@@ -271,6 +271,8 @@ typedef uint32_t phys_t; // Physical Address
 #define pmt_s    0x10000000 // Page Shared
 #define pmt_ppn  0x0fff0000 // Physical Page Number (sw use only)
 #define pmt_phy  0x0000ffff // Physical Page address high order bits
+#define pmt_ppnx 0x0ffc0000 // Physical Page Number (sw use only)
+#define pmt_phyx 0x0003ffff // Physical Page address high order bits
 
 
 #define aaa_none 0b000 // No Access
@@ -378,10 +380,10 @@ typedef struct fr_t {
         };
       };
       union {
-/*002*/ uint32_t a;
+/*002*/ uint32_t h;
         struct {
-/*002*/ uint16_t al;
-/*003*/ uint16_t ah;
+/*002*/ uint16_t hl;
+/*003*/ uint16_t hh;
         };
       };
     };

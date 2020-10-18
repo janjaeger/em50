@@ -38,6 +38,19 @@
  #define DEBUG
 #endif
 
+#if defined(__SIZEOF_INT128__) && defined(__SIZEOF_FLOAT128__)
+ #define FLOAT128 __float128
+ #define UINT128  __uint128
+ #define INT128   __int128
+#endif
+
+#if defined(FLOAT128)
+ #define FLOAT __float128
+#else
+ #define FLOAT double
+#endif
+
+
 #include <stdint.h>
 #include <getopt.h>
 #include <stdio.h>
@@ -52,7 +65,7 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
-#include <stdlib.h>
+#include <poll.h>
 #include <termios.h>
 #include <signal.h>
 #include <fcntl.h>
@@ -82,9 +95,6 @@
 #ifdef LIBTELNET
 #include <libtelnet.h>
 #endif
-
-typedef uint8_t octet_t;
-typedef uint16_t word_t;
 
 
 /* static assertion of structure sizes
@@ -176,6 +186,9 @@ static inline char *c_fname(char *path)
 
 static inline int isfilex(const char *fname)
 {
+  if(!fname) 
+    return ENOENT;
+
   struct stat st;
 
   int rc = stat(fname, &st);
@@ -199,6 +212,9 @@ int rc = isfilex(fname);
 
 static inline int isdirx(const char *fname)
 {
+  if(!fname) 
+    return ENOENT;
+
   struct stat st;
 
   int rc = stat(fname, &st);

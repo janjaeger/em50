@@ -39,7 +39,6 @@
 
 static inline uint32_t E50X(stack_alloc)(cpu_t *cpu, uint32_t s0, uint32_t sz)
 {
-
   uint32_t sn = (E50X(vfetch_d)(cpu, s0) & ~ea_r) | (s0 & ea_r);
 
   if(((sn + sz) & ea_s) == (sn & ea_s))
@@ -64,18 +63,20 @@ E50I(cea)
   logop1(op, "cea");
 
 #if defined E16S || defined E32S || defined E32R
-
   uint16_t a = G_A(cpu);
 
+  uint16_t i = a & 0x8000;
 #if defined E16S
-  if((a & 0x4000))
+  uint16_t x = a & 0x4000;
+
+  if(x)
     a += G_X(cpu);
 #endif
 
-  if((a & 0x8000))
+  if(i)
     a = E50X(vfetch_is)(cpu, a);
 
-  S_A(cpu, a);
+  S_A(cpu, WXX(a));
 #endif
 }
 
@@ -190,16 +191,27 @@ uint32_t ea = E50X(ea)(cpu, op);
 
   logopxo(op, "jst", ea);
 
-  E50X(vstore_w)(cpu, ea, cpu->p);
+  uint16_t r = cpu->p;
+
+#if defined E16S || defined E32S || defined E32R
+  uint16_t ix = E50X(vfetch_w)(cpu, ea);
+#if defined E16S
+  ix &= 0xc000;
+#else
+  ix &= 0x8000;
+#endif
+  r |= ix;
+#endif
+
+  E50X(vstore_w)(cpu, ea, r);
 #if defined V_MODE || defined I_MODE
-  ++ea;
-  S_PB(cpu, ea);
+  S_PB(cpu, intraseg_i(ea, 1));
 #else
   cpu->p = ++ea;
 #endif
 
   if(ea_ring(cpu->pb) == 0)
-    longjmp(cpu->endop, endop_nointr5); // FIXME nointr1 in ring zero only
+    longjmp(cpu->endop, endop_nointr1);
 }
 
 
@@ -334,6 +346,152 @@ int16_t a = (int16_t)G_A(cpu);
 }
 
 
+static inline void E50X(cparg)(cpu_t *cpu)
+{
+  uint32_t xb = G_XB(cpu);
+  uint32_t xn = xb;
+  uint32_t sb = G_SB(cpu);
+  uint32_t ao = E50X(vfetch_d)(cpu, sb + 2);
+  uint32_t so = E50X(vfetch_d)(cpu, sb + 4);
+  uint32_t lo = E50X(vfetch_d)(cpu, sb + 6);
+  uint16_t t = G_T(cpu);
+  uint32_t at = intraseg_o(sb, t);
+  uint16_t x = G_X(cpu);
+  int nargs = G_Y(cpu);
+
+  int l;
+
+  while(nargs > 0)
+  {
+  int bit = 0, s;
+  uint32_t a;
+
+    do
+    {
+      int ind, br;
+
+      uint32_t ca = E50X(vfetch_d)(cpu, ao);
+      bit += ca >> 28;
+      ind = (ca >> 27) & 1;
+      br = (ca >> 24) & 3;
+      l = (ca >> 23) & 1;
+      s = (ca >> 22) & 1;
+      switch(br) {
+        case 0:
+          a = intraseg_o(ao, ca) | (ao & ea_r);
+        break;
+        case 1:
+          a = intraseg_i(so, ca) | (ao & ea_r);
+        break;
+        case 2:
+          a = intraseg_i(lo, ca) | (ao & ea_r);
+        break;
+        case 3:
+          a = intraseg_i(xb, ca) | (ao & ea_r);
+        break;
+      }
+      logmsg("-> pcl tmp %8.8x ap bit %d i %d br %d l %d s %d o %4.4x\n",
+        ao, bit, ind, br, l, s, a);
+
+      if(ind)
+      {
+        uint32_t d = E50X(vfetch_d)(cpu, a);
+        logmsg("\n\n*** PCL INDIRECT %8.8x ***\n", a);
+
+        if((d & ea_e))
+          bit = E50X(vfetch_w)(cpu, intraseg_i(a, 2)) >> 12;
+
+        if((d & ea_f) && (!s || (d & 0x7fff0000)))
+          E50X(pointer_fault)(cpu, 0x8000, a | ea_e);
+
+        if(!(d & ea_f))
+          d |= (a & ea_r);
+
+        a = d;
+      }
+      else if(br == 3) // XB
+      {
+        if((xb & ea_e))
+          bit += (x >> 12) & 0b1111;
+      }
+
+      if(bit > 15)
+      {
+        a = intraseg_i(a, bit >> 4);
+        bit &= 0b1111;
+        a |= ea_e;
+      }
+
+      ao = intraseg_i(ao, 2);
+
+      if(!s)
+      {
+        xb = a;
+        if((xb & ea_e))
+          x = bit << 12;
+        xn = xb | (bit ? ea_e : 0);
+      }
+
+      logmsg("-> pcl %8.8x ap bit %d i %d br %d l %d s %d o %4.4x\n",
+        ao, bit, ind, br, l, s, a);
+
+    } while (!(l || s));
+
+    if(s)
+    {
+      if(bit || (a & ea_e))
+      {
+        logmsg("-> arg %8.8x %8.8x.%4.4x\n", at, a | ea_e, bit << 12);
+        E50X(vstore_d)(cpu, at, a | ea_e);
+        E50X(vstore_w)(cpu, intraseg_i(at, 2), bit << 12);
+        bit = 0;
+      }
+      else
+      {
+        logmsg("-> pcl arg %8.8x %8.8x\n", at, a);
+        E50X(vstore_d)(cpu, at, a & ~ea_e);
+      }
+      at = intraseg_i(at, 3);
+      nargs--;
+
+      if(!l)
+      {	 
+        E50X(vstore_d)(cpu, sb + 2, ao);
+
+        S_Y(cpu, nargs);
+        S_T(cpu, at & 0xffff);
+        S_X(cpu, x);
+        S_XB(cpu, xn);
+      }
+    }
+
+    if(l)
+      break;
+  }
+
+  while(!l)
+  {
+    uint32_t ca = E50X(vfetch_d)(cpu, ao);
+    l = (ca >> 23) & 1;
+    ao = intraseg_i(ao, 2);
+  }
+
+  while(nargs-- > 0)
+  {
+    logmsg("-> arg %8.8x fault set\n", at);
+    E50X(vstore_d)(cpu, at, ea_f);
+    at = intraseg_i(at, 3);
+  }
+
+  E50X(vstore_d)(cpu, sb + 2, ao);
+
+  S_Y(cpu, nargs);
+  S_T(cpu, at);
+  S_X(cpu, x);
+  S_XB(cpu, xn);
+}
+
+
 E50I(pcl)
 {
 uint32_t ea = E50X(ea)(cpu, op);
@@ -343,176 +501,63 @@ uint32_t ea = E50X(ea)(cpu, op);
   uint32_t pb = E50X(vfetch_dx)(cpu, ea, acc_gt);
   if((pb & ea_f))
     E50X(pointer_fault)(cpu, pb >> 16, ea);
-  uint16_t sfsize = E50X(vfetch_wx)(cpu, ea + 2, acc_gt);
-  uint16_t rootsn = E50X(vfetch_wx)(cpu, ea + 3, acc_gt);
-  uint16_t argsdisp = E50X(vfetch_wx)(cpu, ea + 4, acc_gt);
-  int nargs = E50X(vfetch_wx)(cpu, ea + 5, acc_gt);
-  uint32_t lb = E50X(vfetch_dx)(cpu, ea + 6, acc_gt);
-  uint16_t keys = E50X(vfetch_wx)(cpu, ea + 8, acc_gt);
+  uint16_t sfsize = E50X(vfetch_wx)(cpu, intraseg_i(ea, 2), acc_gt);
+//if((sfsize & 1))
+//  ++sfsize;
+  uint16_t rootsn = E50X(vfetch_wx)(cpu, intraseg_i(ea, 3), acc_gt);
+  uint16_t argsdisp = E50X(vfetch_wx)(cpu, intraseg_i(ea, 4), acc_gt);
+  int nargs = E50X(vfetch_wx)(cpu, intraseg_i(ea, 5), acc_gt);
+  uint32_t lb = E50X(vfetch_dx)(cpu, intraseg_i(ea, 6), acc_gt);
+  uint16_t keys = E50X(vfetch_wx)(cpu, intraseg_i(ea, 8), acc_gt);
 
   logmsg("-> pb %8.8x sfsize %4.4x rootsn %4.4x argsdisp %4.4x nargs %4.4x lb %8.8x, keys %4.4x\n",
     pb, sfsize, rootsn, argsdisp, nargs, lb, keys);
 
   uint32_t sb = G_SB(cpu);
-  uint32_t xb = G_XB(cpu);
-  uint16_t x = G_X(cpu);
   uint32_t ao = cpu->pb;
 
-#if 1 // TEMP FIX ARGT SWICHTING RING EARLY
-{
-  uint16_t sdw = E50X(fetch_sdw)(cpu, ea);
+  uint16_t sdw = E50X(fetch_sdw)(cpu, ea, E50X(segment_fault));
   int ring = ea_ring(cpu->pb);
   if(sdw_aaa(sdw, ring) == aaa_gate)
   {
     if((ea & 0xf))
       E50X(access_fault)(cpu, ea);
     cpu->pb &= ~ea_r;
-    cpu->pb |= (pb & ea_r);;
+    cpu->pb |= (pb & ea_r);
     S_RB(cpu, cpu->pb);
   }
-}
-#endif
 
   uint32_t s0;
   if(rootsn != 0)
-    s0 = (cpu->pb & ea_r) | (uint32_t)rootsn << 16;
+    s0 = (cpu->pb & ea_r) | ((uint32_t)rootsn << 16);
   else
-    s0 = ((cpu->pb | sb) & ea_r) | (uint32_t)E50X(vfetch_w)(cpu, sb + 1) << 16;
+    s0 = ((ao | sb) & ea_r) | ((uint32_t)E50X(vfetch_w)(cpu, sb + 1) << 16);
 
   uint32_t sn = E50X(stack_alloc)(cpu, s0, sfsize);
 
   E50X(vstore_d)(cpu, sn + 0, s0 >> 16); // clear flags and store rootsn
+  E50X(vstore_d)(cpu, sn + 2, ao); // return addr - updated by argt
   E50X(vstore_d)(cpu, sn + 4, G_SB(cpu));
   E50X(vstore_d)(cpu, sn + 6, G_LB(cpu));
   E50X(vstore_w)(cpu, sn + 8, cpu->crs->km.keys);
   E50X(vstore_w)(cpu, sn + 9, cpu->p);
-
-  if(nargs)
-  {
-    uint32_t at = sn + argsdisp;
-
-    int bit, ind, br, l, s;
-    uint32_t a;
-
-    bit = 0;
-
-    do
-    {
-      do 
-      {
-        uint32_t ca = E50X(vfetch_d)(cpu, ao); 
-        bit += ca >> 28;
-        ind = (ca >> 27) & 1;
-        br = (ca >> 24) & 3;
-        l = (ca >> 23) & 1;
-        s = (ca >> 22) & 1;
-        a = intraseg_i(br == 3 ? xb : G_ZB(cpu, br), ca & 0xffff) | (ao & ea_r);
-        logmsg("-> pcl tmp %8.8x ap bit %d i %d br %d l %d s %d o %4.4x\n",
-          ao, bit, ind, br, l, s, a);
-
-        if(ind)
-        {
-          uint32_t d = E50X(vfetch_d)(cpu, a);
-          logmsg("\n\n*** PCL INDIRECT %8.8x ***\n", a);
-
-          if((d & ea_e))
-          {
-            bit = E50X(vfetch_w)(cpu, intraseg_i(a, 2)) >> 12;
-          }
-
-          if((d & ea_f) && (!s || (d & 0x7fff0000)))
-            E50X(pointer_fault)(cpu, 0x8000, a | ea_e);
-
-          if(!(d & ea_f))
-            d |= (a & ea_r);
-
-          a = d;
-        }
-        else if(br == 3) // XB
-        {
-          if((xb & ea_e))
-          {
-            bit += (x >> 12) & 0b1111;
-          }
-        }
-
-        if(bit > 15)
-        {
-          a = intraseg_i(a, bit >> 4);
-          bit &= 0b1111;
-          a |= ea_e;
-        }
-
-        if(!s)
-        {
-          xb = a;
-          if((xb & ea_e))
-          {
-            x = bit << 12;
-            S_X(cpu, x);
-          }
-          S_XB(cpu, xb | (bit ? ea_e : 0));
-        }
-
-        logmsg("-> pcl %8.8x ap bit %d i %d br %d l %d s %d o %4.4x\n",
-          ao, bit, ind, br, l, s, a);
-
-        ao = intraseg_i(ao, 2);
-
-      } while (!(l || s));
-
-      if(s)
-      {
-        if(bit || (a & ea_e))
-        {
-          logmsg("-> arg %8.8x %8.8x%4.4x\n", at, a | ea_e, bit << 12);
-          E50X(vstore_d)(cpu, at, a | ea_e);
-          E50X(vstore_w)(cpu, intraseg_i(at, 2), bit << 12);
-          bit = 0;
-        }
-        else
-        {
-          logmsg("-> pcl arg %8.8x %8.8x\n", at, a);
-          E50X(vstore_d)(cpu, at, a);
-        }
-        at = intraseg_i(at, 3);
-        --nargs;
-      }
-
-    } while (!l && nargs > 0);
-
-    while(!l)
-    {
-      uint32_t ca = E50X(vfetch_d)(cpu, ao); 
-      l = (ca >> 23) & 1;
-      ao = intraseg_i(ao, 2);
-    }
-
-    while(nargs-- > 0)
-    {
-      logmsg("-> arg %8.8x fault set\n", at);
-      E50X(vstore_d)(cpu, at, ea_f);
-      at = intraseg_i(at, 3);
-    }
-
-  }
-
-  E50X(vstore_d)(cpu, sn + 2, ao); // return addr
-
-  E50X(vstore_d)(cpu, s0, (sn + sfsize));
+  E50X(vstore_d)(cpu, s0, sn + sfsize);
 
   S_SB(cpu, sn);
   S_LB(cpu, lb);
-
-  uint16_t sdw = E50X(fetch_sdw)(cpu, ea);
-  int ring = ea_ring(ao);
-logmsg("pcl ring %d access %d sdw %4.4x\n", ring, sdw_aaa(sdw, ring), sdw);
-  if(sdw_aaa(sdw, ring) == aaa_gate)
-    S_RB(cpu, pb);
-  else
-    S_PB(cpu, pb);
-
+  S_PB(cpu, pb);
+  cpu->po = cpu->pb;
   S_KEYS(cpu, keys);
+  cpu->crs->km.in = cpu->crs->km.sd = 0;
+
+  if(nargs)
+  {
+    S_Y(cpu, nargs);
+    S_T(cpu, sn + argsdisp);
+    E50X(cparg)(cpu);
+    cpu->p++;
+  }
+
   set_cpu_mode(cpu, cpu->crs->km.mode);
 }
 
@@ -521,12 +566,14 @@ logmsg("pcl ring %d access %d sdw %4.4x\n", ring, sdw_aaa(sdw, ring), sdw);
  * Argument Transfer
  * 0000000110000101 (V mode form)
  */
-#if defined V_MODE || defined I_MODE
+//#if defined V_MODE || defined I_MODE
 E50I(argt)
 {
   logop1(op, "*argt");
+
+  E50X(cparg)(cpu);
 }
-#endif
+//#endif
 
 
 E50I(prtn)
@@ -550,16 +597,23 @@ uint32_t sb = G_SB(cpu);
 
   S_KEYS(cpu, keys);
   cpu->crs->km.in = cpu->crs->km.sd = 0;
+
   set_cpu_mode(cpu, cpu->crs->km.mode);
 }
 
 
 E50I(stex)
 {
-uint32_t l = G_L(cpu);
-uint32_t sb = G_SB(cpu);
-
   logop1(op, "*stex");
+
+#ifdef I_MODE
+  int dr = op_dr(op);
+  uint32_t l = G_R(cpu, dr);
+#else
+  uint32_t l = G_L(cpu);
+#endif
+
+  uint32_t sb = G_SB(cpu);
 
   if((l & 1))
     ++l;
@@ -570,7 +624,11 @@ uint32_t sb = G_SB(cpu);
 
   E50X(vstore_d)(cpu, s0, sn + l);
 
+#ifdef I_MODE
+  S_R(cpu, dr, sn);
+#else
   S_L(cpu, sn);
+#endif
 }
 
 
@@ -579,27 +637,25 @@ E50I(calf)
   uint32_t ap = E50X(vfetch_iap)(cpu, NULL);
 
   logop1o(op, "*calf", ap);
-  // TODO
 
   uint32_t pb = E50X(vfetch_dx)(cpu, ap, acc_gt);
   if((pb & ea_f))
     E50X(pointer_fault)(cpu, pb >> 16, ap);
-  uint16_t sfsize = E50X(vfetch_wx)(cpu, ap + 2, acc_gt);
-  uint16_t rootsn = E50X(vfetch_wx)(cpu, ap + 3, acc_gt);
-  uint16_t argsdisp = E50X(vfetch_wx)(cpu, ap + 4, acc_gt);
-  int nargs = E50X(vfetch_wx)(cpu, ap + 5, acc_gt);
-  uint32_t lb = E50X(vfetch_dx)(cpu, ap + 6, acc_gt);
-  uint16_t keys = E50X(vfetch_wx)(cpu, ap + 8, acc_gt);
+  uint16_t sfsize = E50X(vfetch_wx)(cpu, intraseg_i(ap, 2), acc_gt);
+//if((sfsize & 1))
+//  ++sfsize;
+  uint16_t rootsn = E50X(vfetch_wx)(cpu, intraseg_i(ap, 3), acc_gt);
+  uint16_t argsdisp = E50X(vfetch_wx)(cpu, intraseg_i(ap, 4), acc_gt);
+  int nargs = E50X(vfetch_wx)(cpu, intraseg_i(ap, 5), acc_gt);
+  uint32_t lb = E50X(vfetch_dx)(cpu, intraseg_i(ap, 6), acc_gt);
+  uint16_t keys = E50X(vfetch_wx)(cpu, intraseg_i(ap, 8), acc_gt);
 
   logmsg("-> calf %8.8x sfsize %4.4x rootsn %4.4x lb %8.8x, keys %4.4x\n",
     pb, sfsize, rootsn, lb, keys);
 
   uint32_t sb = G_SB(cpu);
 
-#if 1 // TEMP FIX ARGT SWICHTING RING EARLY
-  uint32_t ao = cpu->pb;
-{
-  uint16_t sdw = E50X(fetch_sdw)(cpu, ap);
+  uint16_t sdw = E50X(fetch_sdw)(cpu, ap, E50X(segment_fault));
   int ring = ea_ring(cpu->pb);
   if(sdw_aaa(sdw, ring) == aaa_gate)
   {
@@ -609,14 +665,12 @@ E50I(calf)
     cpu->pb |= (pb & ea_r);;
     S_RB(cpu, cpu->pb);
   }
-}
-#endif
 
   uint32_t s0;
   if(rootsn != 0)
-    s0 = (cpu->pb & ea_r) | (uint32_t)rootsn << 16;
+    s0 = (cpu->pb & ea_r) | ((uint32_t)rootsn << 16);
   else
-    s0 = (sb & ea_r) | (uint32_t)E50X(vfetch_w)(cpu, sb + 1) << 16;
+    s0 = (sb & ea_r) | ((uint32_t)E50X(vfetch_w)(cpu, sb + 1) << 16);
 
   uint32_t sn = E50X(stack_alloc)(cpu, s0, sfsize);
 
@@ -625,6 +679,7 @@ E50I(calf)
   E50X(vstore_d)(cpu, sn + 4, G_SB(cpu));
   E50X(vstore_d)(cpu, sn + 6, G_LB(cpu));
   E50X(vstore_w)(cpu, sn + 9, cpu->p);
+  E50X(vstore_w)(cpu, sn + 12, 0);
 
   uint32_t at = sn + argsdisp;
 
@@ -634,7 +689,7 @@ E50I(calf)
       E50X(vstore_d)(cpu, at, ea_f);
       at += 3;
   }
-    
+
   uint32_t csf = E50X(csf_pop)(cpu);
 
   E50X(vstore_d)(cpu, sn + 2, E50X(vfetch_dp)(cpu, csf + offsetin(csf_t, pc)));
@@ -646,16 +701,10 @@ E50I(calf)
 
   S_SB(cpu, sn);
   S_LB(cpu, lb);
-
-  uint16_t sdw = E50X(fetch_sdw)(cpu, ap);
-  int ring = ea_ring(ao);
-logmsg("calf ring %d access %d sdw %4.4x\n", ring, sdw_aaa(sdw, ring), sdw);
-  if(sdw_aaa(sdw, ring) == aaa_gate)
-    S_RB(cpu, pb);
-  else
-    S_PB(cpu, pb);
-
+  S_PB(cpu, pb);
   S_KEYS(cpu, keys);
+  cpu->crs->km.in = cpu->crs->km.sd = 0;
+
   set_cpu_mode(cpu, cpu->crs->km.mode);
 }
 
@@ -671,10 +720,13 @@ E50I(svc)
 E50I(xec)
 {
 uint32_t ea = E50X(ea)(cpu, op);
-  logop1(op, "xec");
+
+  logopxo(op, "xec", ea);
 
   cpu->exec = ea;  // FIXME TODO CANNOT EXECUTE FROM LOC 0
   cpu->inst = E50X(vfetch_i)(cpu);
+  if((cpu->inst & 0x3fec) == 0x0708)
+    E50X(rxm_fault)(cpu);
   E50X(decode)(cpu, cpu->op);
   cpu->exec = 0;
 

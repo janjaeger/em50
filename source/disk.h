@@ -33,6 +33,9 @@
 
 int disk_io(cpu_t *cpu, int, int, int, int, void **, int, char *[]);
 
+#define DK_UNITS 8
+#define DK_BUFFS 4096
+
 typedef struct {
   char id[4];
 #define dskhdr_id "EM50"
@@ -57,6 +60,7 @@ typedef struct {
   uint32_t tracks;
   uint32_t records;
   uint32_t size;
+  uint32_t seek;
 } dm_t;
 
 typedef struct dk_t {
@@ -87,7 +91,9 @@ int busy;
   uint16_t ca; // Channel Address
   int mhd;
   intr_t intr;
-  dm_t dm[4];
+  dm_t dm[DK_UNITS];
+  uint16_t bp;
+  uint16_t bf[DK_BUFFS];
 } dk_t;
 
 #define DK_DHLT   0x0
@@ -112,7 +118,6 @@ int busy;
 #define DK_MDERR   0b000010
 #define DK_MBUSY   0b000001
 
-
 static const int recsize[16] = { 1040, 448, 512, 64, 128, 0, 0, 0, 2048, 0, 0, 0, 0, 0, 0, 0};
 
 static const struct {
@@ -121,21 +126,28 @@ static const struct {
   const int  tracks;
   const int  records;
 } disk_type[] = {
-/*  60 */  { "MODEL_4711",  4, 1020    ,  7 },
-/*  68 */  { "68MB",        3, 1119 + 2,  9 },
-/*  84 */  { "MODEL_4714",  5, 1015 + 2,  8 },
-/*  96 */  { "CMD",         6,  823    ,  9 },
-/* 120 */  { "MODEL_4715",  8, 1020    ,  7 },
-/* 158 */  { "158MB",       7, 1119 + 2,  9 },
-/* 160 */  { "160MB",      10,  821 + 2,  9 },
-/* 258 */  { "MODEL_4719", 17, 1220 + 2,  6 },
-/* 315 */  { "MODEL_4475", 19,  823    ,  9 },
-/* 328 */  { "MODEL_4721", 12, 1641    ,  8 },
-/* 496 */  { "MODEL_4735", 24,  711 + 2, 14 },
-/* 675 */  { "600MB",      40,  841 + 2,  9 },
-/* 770 */  { "MODEL_4845", 23,  848 + 2, 19 },
-/* 817 */  { "MODEL_4860", 15, 1379 + 2, 19 },
-/* 300 */  { "SMD",        19,  823    ,  9 }
+/*  60 */  { "MODEL_4711",  4, 1020    ,   7 },
+/*  68 */  { "68MB",        3, 1119 + 2,   9 },
+/*  84 */  { "MODEL_4714",  5, 1015 + 2,   8 },
+/*  96 */  { "CMD",         6,  823    ,   9 },
+/* 120 */  { "MODEL_4715",  8, 1020    ,   7 },
+/* 158 */  { "158MB",       7, 1119 + 2,   9 },
+/* 160 */  { "160MB",      10,  821 + 2,   9 },
+/* 258 */  { "MODEL_4719", 17, 1220 + 2,   6 },
+/* 315 */  { "MODEL_4475", 19,  823    ,   9 },
+/* 328 */  { "MODEL_4721", 12, 1641    ,   8 },
+/* 496 */  { "MODEL_4735", 24,  711 + 2,  14 },
+/* 675 */  { "600MB",      40,  841 + 2,   9 },
+/* 770 */  { "MODEL_4845", 23,  848 + 2,  19 },
+/* 817 */  { "MODEL_4860", 15, 1379 + 2,  19 },
+/* 300 */  { "SMD",        19,  823    ,   9 },
+/* 213 */  { "MODEL_4730", 31,   13 + 1, 254 },
+/* 328 */  { "MODEL_472I", 31,   20    , 254 },
+/* 421 */  { "MODEL_4731", 31,   25 + 1, 254 },
+/* 637 */  { "MODEL_4729", 31,   41 + 1, 254 },
+/* 1.0 */  { "MODEL_4734", 31,   64 + 1, 254 },
+/* 1.3 */  { "MODEL_4732", 31,   81 + 1, 254 },
+/* 2.0 */  { "MODEL_4736", 31,  121 + 1, 254 }
 };
 
 static const int disk_ntypes = sizeof(disk_type)/sizeof(*disk_type);
@@ -146,7 +158,10 @@ static const int unit[] = { -1,  0,  1, -1,
                              2, -1, -1, -1,
                              3, -1, -1, -1,
                             -1, -1, -1, -1 };
-  return unit[mask & 0b1111];
+  if((mask & 0b1111))
+    return unit[mask & 0b1111];
+  else
+    return unit[(mask >> 4) & 0b1111] + 4;
 }
 
 static inline int dk_rdhdr(dm_t *dm)
@@ -214,21 +229,30 @@ static inline const char *dk_fixup(dm_t *dm)
 
   for(int n = 0; n < disk_ntypes; ++n)
   {
-    if(dm->records != disk_type[n].records)
-      continue;
-
-    if(dm->tracks != disk_type[n].tracks)
-      continue;
-
-    if(dm->heads == disk_type[n].heads)
+    if(dm->records == disk_type[n].records
+     && dm->tracks == disk_type[n].tracks
+     && dm->heads == disk_type[n].heads)
       return disk_type[n].name;
-    else
+
+    if((dm->records == disk_type[n].records
+     && dm->tracks == disk_type[n].tracks)
+    || (dm->records == disk_type[n].records
+     && dm->heads == disk_type[n].heads)
+    || (dm->tracks == disk_type[n].tracks
+     && dm->heads == disk_type[n].heads))
+    {
+      if(dm->records < disk_type[n].records)
+        dm->records = disk_type[n].records;
+
+      if(dm->tracks < disk_type[n].tracks)
+        dm->tracks = disk_type[n].tracks;
+
       if(dm->heads < disk_type[n].heads)
-      {
         dm->heads = disk_type[n].heads;
-        dk_wrhdr(dm);
-        return disk_type[n].name;
-      }
+
+      dk_wrhdr(dm);
+      return disk_type[n].name;
+    }
   }
 
   return NULL;
@@ -262,6 +286,25 @@ static inline int dk_close(dm_t *dm)
   close(dm->fd);
   dm->fd = -1;
 
+  return -1;
+}
+
+static inline int dk_crnew(dm_t *dm, const char *type, int size)
+{
+  for(int n = 0; n < disk_ntypes; ++n)
+    if(!strcasecmp(disk_type[n].name, type))
+    {
+      dm->heads = disk_type[n].heads;
+      dm->tracks = disk_type[n].tracks;
+      dm->records = disk_type[n].records;
+      dm->size = recsize[size & 0xf];
+      if(dk_creat(dm) < 0)
+        return -1;
+      dk_close(dm);
+      return 0;
+    }
+
+  fprintf(stderr, "disk type invalid: %s\n", type);
   return -1;
 }
 
@@ -367,8 +410,6 @@ static inline uint16_t dk_format(dm_t *dm, uint32_t size, uint32_t head, uint32_
 
   if(lseek(dm->fd, offset, SEEK_SET) != offset)
     return DK_STAT_SEEKERR;
-
-//lseek(dm->fd, -1, SEEK_CUR); uint8_t n = 0; write(dm->fd, &n, 1);
 
   return DK_STAT_OK;
 }

@@ -87,6 +87,12 @@ cput = cpu;
 #endif
 
   pthread_setname_np(pthread_self(), "cpu");
+  
+  sigset_t set;
+  sigemptyset(&set);
+  sigaddset(&set, SIGINT);
+  sigaddset(&set, SIGTSTP);
+  pthread_sigmask(SIG_BLOCK, &set, NULL);
 
   smode_t mode = setjmp(cpu->smode);
 

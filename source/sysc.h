@@ -49,6 +49,7 @@ typedef struct sc_t {
   uint16_t t1;  /* Transmit Control Register 1 */
   uint16_t r2;  /* Receive Control Register 2 */
   uint16_t t2;  /* Transmit Control Register 2 */
+  int im; /* Interrupt mask */
   intr_t ri;
   intr_t ti;
   int echo;

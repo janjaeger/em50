@@ -133,7 +133,7 @@ int argc = 0;
 
 static inline int cmd_i2r(cpu_t *cpu, uint32_t vaddr, uint32_t *raddr)
 {
-int32_t r = i2r(cpu, vaddr);
+int32_t r = c2r(cpu, vaddr);
 
   if(r >= 0)
   {
@@ -310,8 +310,30 @@ urs_t *reg = cpu->crs;
   printf("PPA   %4.4x:%4.4x\n", cpu->srf.mrf.ppa, cpu->srf.mrf.pcba);
   printf("PPB   %4.4x:%4.4x\n", cpu->srf.mrf.ppb, cpu->srf.mrf.pcbb);
   printf("TIMER %9.8x\n", reg->timer + em50_timer());
+  printf("A/B   %4.4x/%4.4x\n", G_A(cpu), G_B(cpu));
+  printf("X/Y   %4.4x/%4.4x\n", G_X(cpu), G_Y(cpu));
+  for(int far = 0; far < 2; ++far)
+  printf("FAR%d %8.8x/%6.6x:%4.4x\n", far, G_FAR(cpu, far), G_FLR(cpu, far), G_FBR(cpu, far));
   printf("PC    %o(%o)/%o\n", ea_seg(cpu->pb), ea_ring(cpu->pb), ea_word(cpu->pb));
 
+  for(int r = 0; r < 16; r +=2)
+  {
+    int e, f; // endianess corrected r
+    switch(r) {
+      case 0x08:
+      case 0x09:
+      case 0x0a:
+      case 0x0b:
+        e = r ^ 1;
+        f = (r + 1) ^ 1;
+        break;
+      default:
+        e = r;
+        f = r + 1;
+    }
+    printf("R%02d %8.8x   R%02d %8.8x\n", r, cpu->crs->r[e],
+                                          r+1, cpu->crs->r[f]);
+  }
   return 0;
 }
 
@@ -455,6 +477,7 @@ int argd = 0;
   if(argc > 1)
   {
   int sw, ctrl, unit; char c;
+    if(sscanf(argv[1], "%o%c%o%c", &ctrl, &c, &unit, &c) != 3)
     if((sscanf(argv[1], "%o%c", &sw, &c) != 1
       && (sw = cmd_mt2sw(argv[1])) < 0)
       || argd || cmd_sw2dev(sw, &ctrl, &unit, 0))
@@ -507,6 +530,16 @@ static int cmd_sdatasw(int argc, char *argv[], cpu_t *cpu)
   }
   else
     printf("DATASW  %06o\n", cpu->sys->dswitches);
+
+  return 0;
+}
+
+
+static int cmd_load(int argc, char *argv[], cpu_t *cpu)
+{
+  for(int n = 1; n < argc; ++n)
+    if(!cpload(cpu, argv[n]))
+      printf("Load of %s failed: %s\n", argv[1], strerror(errno));
 
   return 0;
 }
@@ -936,6 +969,7 @@ static const struct {
 } cmdtab[] = { 
   { "ASSIGN",   2, okrc, cmd_assign,   &help_assign },
   { "BOOT",     1, okrc, cmd_boot,     &help_boot },
+  { "LOAD",     4, okrc, cmd_load,     &help_load },
   { "TERMINAL", 4, okrc, cmd_terminal, &help_terminal },
   { "SYSCLR",   4, okrc, cmd_sysclr,   &help_sysclr },
   { "STORE",    2, okrc, cmd_alter,    &help_alter },
@@ -1028,7 +1062,7 @@ static inline int cmd_exec(char *cmdline, cpu_t *cpu)
 static sigjmp_buf cmd_control_c_jmpbuf;
 static void cmd_control_c(int signo, siginfo_t *siginfo, void *context)
 {
-  longjmp(cmd_control_c_jmpbuf, 1);
+  siglongjmp(cmd_control_c_jmpbuf, 1);
 }
 
 int cmd_main(cpu_t *cpu)
@@ -1042,7 +1076,7 @@ int cmd_main(cpu_t *cpu)
   ssize_t len;
   int rc;
 
-  if(setjmp(cmd_control_c_jmpbuf))
+  if(sigsetjmp(cmd_control_c_jmpbuf, 1))
     putchar('\n');
   else
   {
@@ -1064,7 +1098,7 @@ int cmd_main(cpu_t *cpu)
   char *cmdline;
   int rc;
 
-  if(setjmp(cmd_control_c_jmpbuf))
+  if(sigsetjmp(cmd_control_c_jmpbuf, 1))
     putchar('\n');
   else
   {

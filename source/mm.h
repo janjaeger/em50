@@ -63,23 +63,39 @@ typedef enum {
 
 static inline uint32_t intraseg_o(uint32_t a, uint16_t o)
 {
+#if 1
 dw_t w;
 
-  w.w = a;
+  w.d = a;
   w.l = o;
 
-  return w.w;
+  return w.d;
+#else
+  return (a & 0xffff0000) | (o & 0x0000ffff);
+#endif
 }
 
 
 static inline uint32_t intraseg_i(uint32_t a, uint16_t o)
 {
+#if 1
 dw_t w;
 
-  w.w = a;
+  w.d = a;
   w.l += o;
 
-  return w.w;
+  return w.d;
+#else
+  return (a & 0xffff0000) | ((a + o) & 0x0000ffff);
+#endif
+}
+
+
+static inline uint32_t inc_d(uint32_t *a)
+{
+dw_t *w = (dw_t *)a;
+  ++(w->l);
+  return w->d;
 }
 
 
@@ -110,16 +126,12 @@ static inline void mm_itlb(cpu_t *cpu, uint32_t vaddr)
 }
 
 
-static inline void mm_ptlb(cpu_t *cpu)
-{
-  memset(cpu->tlb.v, 0xff, sizeof(cpu->tlb.v));
-  memset(cpu->iotlb.i, 0xff, sizeof(cpu->iotlb.i));
-}
-
-
 static inline uint16_t tfetch_w(cpu_t *cpu, uint16_t addr)
 {
 logmsg("\n@TFETCH %4.4x\n", addr);
+//if(addr >= (cpu->crs->km.sm ? 010 : 040))
+//  printf("BUG addr %4.4x\n", addr);
+
   addr &= 037;
   cpu->atr++;
 
@@ -144,8 +156,8 @@ logmsg("\n@TFETCH %4.4x\n", addr);
       return cpu->crs->dtar[3-3] >> 16;
     case 011: // FCODE H
       return cpu->crs->fcodeh;
-    case 012: // FADDR H
-      return cpu->crs->faddrh;
+    case 012: // FADDR L
+      return cpu->crs->faddrl;
     case 013: // FAR0 H
       return cpu->crs->far0 >> 16;
     case 014: // SB H
@@ -200,7 +212,7 @@ logmsg("\n@TSTORE %4.4x %4.4x\n", addr, val);
       cpu->crs->fcodeh = val;
       return;
     case 012:
-      cpu->crs->faddrh = val;
+      cpu->crs->faddrl = val;
       return;
     case 013:
       cpu->crs->far0 = (val << 16) | (cpu->crs->far0 & 0xffff);
@@ -231,13 +243,13 @@ dw_t w;
   w.h = tfetch_w(cpu, addr);
   w.l = tfetch_w(cpu, addr + 1);
 
-  return w.w;
+  return w.d;
 }
 
 
 static inline uint64_t tfetch_q(cpu_t *cpu, uint32_t addr)
 {
-dq_t q;
+qw_t q;
 
   q.h = tfetch_d(cpu, addr);
   q.l = tfetch_d(cpu, addr + 2);
@@ -250,7 +262,7 @@ static inline void tstore_d(cpu_t *cpu, uint32_t addr, uint32_t val)
 {
 dw_t w;
 
-  w.w = val;
+  w.d = val;
 
   tstore_w(cpu, addr, w.h);
   tstore_w(cpu, addr + 1, w.l);
@@ -261,7 +273,7 @@ dw_t w;
 
 static inline void tstore_q(cpu_t *cpu, uint32_t addr, uint64_t val)
 {
-dq_t q;
+qw_t q;
 
   q.q = val;
 
@@ -355,8 +367,7 @@ if(addr < 0100) logmsg("\n@FETCH %4.4x %16.16jx\n", addr, (uintmax_t)q);
 #endif
 
 
-
-static inline uint32_t E50X(fetch_sdw)(cpu_t *cpu, uint32_t vaddr)
+static inline uint32_t E50X(fetch_sdw)(cpu_t *cpu, uint32_t vaddr, void (*sfault)(cpu_t *, uint16_t, uint32_t))
 {
   uint32_t d = ea_dtar(vaddr);
   uint32_t s = ea_segd(vaddr);
@@ -365,7 +376,8 @@ static inline uint32_t E50X(fetch_sdw)(cpu_t *cpu, uint32_t vaddr)
   if(s >= G_DTAR_L(cpu, d))
   {
 logall("FAULT dtar %8.8x len %x addr %8.8x ie %d\n", G_DTAR_L(cpu, d), G_DTAR_A(cpu, d), vaddr, cpu->crs->km.ie);
-    E50X(segment_fault)(cpu, segment_fault_dtar, vaddr);
+    sfault(cpu, segment_fault_dtar, vaddr);
+    return sdw_f;
   }
 
   dbgmsg("\naddr(%8.8x) dtar(%d) seg(%03x) page(%02x) offset(%03x)\n", vaddr, d, s, p, o);
@@ -382,7 +394,7 @@ logall("FAULT dtar %8.8x len %x addr %8.8x ie %d\n", G_DTAR_L(cpu, d), G_DTAR_A(
   if((sdw & sdw_f))
   {
 logall("FAULT raddr %8.8x sdw %8.8x vaddr %8.8x ie %d\n", sdt, sdw, vaddr, cpu->crs->km.ie);
-    E50X(segment_fault)(cpu, segment_fault_sdw, vaddr);
+    sfault(cpu, segment_fault_sdw, vaddr);
   }
 
   return sdw;
@@ -391,7 +403,7 @@ logall("FAULT raddr %8.8x sdw %8.8x vaddr %8.8x ie %d\n", sdt, sdw, vaddr, cpu->
 
 static inline void E50X(acc_check)(cpu_t *cpu, uint32_t sdw, uint32_t vaddr, acc_t acc)
 {
-int ring = ea_ring(cpu->pb | vaddr);
+int ring = ea_ring(vaddr);
 
   if(ring == 0)
     return;
@@ -434,36 +446,10 @@ int access = sdw_aaa(sdw, ring);
 }
 
 
-static inline uint32_t E50X(v2rx)(cpu_t *cpu, uint32_t vaddr, acc_t acc)
+static inline int32_t E50X(xlatv2r)(cpu_t *cpu, uint32_t sdw, uint32_t vaddr, acc_t acc, void (*pfault)(cpu_t *, uint32_t))
 {
-#if defined E16S || defined E32S || defined E32R || defined E64R
-  vaddr |= (cpu->b << 16);
-#else
-  vaddr |= (cpu->b << 16) & ea_r;
-#endif
-
-  if(!cpu->crs->km.sm)
-    return vaddr & 0x0fffffff;
-
-  uint32_t x = CACHE_INDEX(vaddr, acc);
-
-  if(acc != acc_io)
-  {
-dbgmsg("v %8.8x r %8.8x i %d a %8.8x\n", cpu->tlb.v[x], cpu->tlb.r[x], x, vaddr);
-    if(cpu->tlb.v[x] == (vaddr & ~0x3ff))
-    {
-      E50X(acc_check)(cpu, cpu->tlb.s[x], vaddr, acc);
-      return cpu->tlb.r[x] | (vaddr & 0x3ff);
-    }
-  }
-
   uint32_t p = ea_page(vaddr);
   uint32_t o = ea_off(vaddr);
-
-  uint32_t sdw = E50X(fetch_sdw)(cpu, vaddr);
-
-  E50X(acc_check)(cpu, sdw, vaddr, acc);
-
   uint32_t h = sdw_a(sdw);
 
   dbgmsg("sdt(%8.8x) %8.8x sdw(%8.8x)\n", sdt, rfetch_d(cpu, sdt), h);
@@ -480,13 +466,26 @@ dbgmsg("v %8.8x r %8.8x i %d a %8.8x\n", cpu->tlb.v[x], cpu->tlb.r[x], x, vaddr)
     if(!(pmt & pmt_r))
     {
 logall("FAULT raddr %8.8x pmt %8.8x vaddr %8.8x ie %d\n", h + (p << 1), pmt, vaddr, cpu->crs->km.ie);
-      E50X(page_fault)(cpu, vaddr);
+      if(pfault)
+        pfault(cpu, vaddr);
+      return -1;
     }
     pmt |= pmt_u;
     if(acc == acc_wr || acc == acc_wx)
       pmt &= ~pmt_m;
     rstore_d(cpu, h + (p << 1), pmt);
-    r = ((pmt & pmt_phy) << 10) | o;
+#if !defined(MODEL)
+    if(cpu->model.have_pmt == pmtx)
+#endif
+#if !defined(MODEL) || defined(em50_have_pmtx)
+      r = ((pmt & pmt_phyx) << 10) | o;
+#endif
+#if !defined(MODEL)
+    else
+#endif
+#if !defined(MODEL) || !defined(em50_have_pmtx)
+      r = ((pmt & pmt_phy) << 10) | o;
+#endif
   }
 #endif
 #if !defined(MODEL)
@@ -498,7 +497,9 @@ logall("FAULT raddr %8.8x pmt %8.8x vaddr %8.8x ie %d\n", h + (p << 1), pmt, vad
     if(!(hmap & hmap_r))
     {
 logall("FAULT raddr %8.8x hmap %4.4x vaddr %8.8x ie %d\n", h + p, hmap, vaddr, cpu->crs->km.ie);
-      E50X(page_fault)(cpu, vaddr);
+      if(pfault)
+        pfault(cpu, vaddr);
+      return -1;
     }
     hmap |= hmap_u;
     if(acc == acc_wr || acc == acc_wx)
@@ -507,6 +508,37 @@ logall("FAULT raddr %8.8x hmap %4.4x vaddr %8.8x ie %d\n", h + p, hmap, vaddr, c
     r = ((hmap & hmap_phy) << 10) | o;
   }
 #endif
+
+  return r;
+}
+
+
+static inline uint32_t E50X(v2rx)(cpu_t *cpu, uint32_t vaddr, acc_t acc)
+{
+//if((vaddr & 0x0ffffffe) == 0xc0207ec)
+//{
+//	printf("ZZZ %4.4x\n", cpu->crs->ownerl);
+//	logall("ZZZ %4.4x\n", cpu->crs->ownerl);
+//}
+
+  vaddr |= cpu->pb & ea_r;
+
+  uint32_t x = CACHE_INDEX(vaddr, acc);
+
+  if(acc != acc_io)
+  {
+dbgmsg("v %8.8x r %8.8x i %d a %8.8x\n", cpu->tlb.v[x], cpu->tlb.r[x], x, vaddr);
+    if(cpu->tlb.v[x] == (vaddr & ~0x3ff))
+    {
+      E50X(acc_check)(cpu, cpu->tlb.s[x], vaddr, acc);
+      return cpu->tlb.r[x] | (vaddr & 0x3ff);
+    }
+  }
+
+  uint32_t sdw = E50X(fetch_sdw)(cpu, vaddr, E50X(segment_fault));
+  E50X(acc_check)(cpu, sdw, vaddr, acc);
+
+  uint32_t r = E50X(xlatv2r)(cpu, sdw, vaddr, acc, E50X(page_fault));
 
   dbgmsg("\n-> v %8.8x -> r %8.8x\n", vaddr, r);
 
@@ -523,10 +555,47 @@ logall("FAULT raddr %8.8x hmap %4.4x vaddr %8.8x ie %d\n", h + p, hmap, vaddr, c
 
 static inline uint32_t E50X(v2r)(cpu_t *cpu, uint32_t vaddr, acc_t acc)
 {
-//if((vaddr & ea_f)) PRINTF("bug2\n");
-uint32_t r = E50X(v2rx)(cpu, vaddr, acc);
-  return r;
+if((vaddr & ea_f)) PRINTF("bug2\n");
+#if defined E16S || defined E32S || defined E32R || defined E64R
+  vaddr |= (cpu->b << 16);
+#else
+  vaddr |= (cpu->b << 16) & ea_r;
+#endif
+
+  if(!cpu->crs->km.sm)
+    return vaddr & 0x0fffffff;
+
+  return E50X(v2rx)(cpu, vaddr, acc);
 }
+
+
+#if defined(HMDE)
+static inline int32_t i2r(cpu_t *cpu, uint32_t vaddr)
+{
+  if(!cpu->crs->km.mio)
+    return vaddr & 0x0fffffff;
+
+  int32_t r = cpu->iotlb.i[IOTLB_INDEX(vaddr)] | (vaddr & em50_page_offm);
+logmsg("i2r [%d] %8.8x %8.8x\n", IOTLB_INDEX(vaddr), vaddr, r);
+  if(r >= 0)
+    return r;
+  else
+  {
+    uint32_t sdw = E50X(fetch_sdw)(cpu, vaddr, NULL);
+    if((sdw & sdw_f))
+      return -1;
+    r = E50X(xlatv2r)(cpu, sdw, vaddr, acc_io, NULL);
+logmsg("i2r > %8.8x\n", r);
+    if(r >= 0)
+    {
+      cpu->iotlb.i[IOTLB_INDEX(vaddr)] = r & em50_page_mask;
+      return r;
+    }
+  }
+
+  return -1;
+}
+#endif
 
 
 static inline uint16_t E50X(vfetch_wx)(cpu_t *cpu, uint32_t addr, acc_t acc)
@@ -560,7 +629,7 @@ logmsg("\n\n*** " E50S " %4.4x vfetch_d %8.8x %8.8x %s***\n\n", cpu->crs->ownerl
     else
       r = tfetch_d(cpu, addr);
   else
-    r = (E50X(vfetch_wx)(cpu, addr, acc) << 16) | E50X(vfetch_wx)(cpu, addr + 1, acc);
+    r = (E50X(vfetch_wx)(cpu, addr, acc) << 16) | E50X(vfetch_wx)(cpu, intraseg_i(addr, 1), acc);
 
   return r;
 }
@@ -583,7 +652,7 @@ logmsg("\n\n*** " E50S " %4.4x vfetch_q %8.8x %16.16jx %s***\n\n", cpu->crs->own
     else
       r = tfetch_q(cpu, addr);
   else
-    r = ((uint64_t)E50X(vfetch_dx)(cpu, addr, acc) << 32) | E50X(vfetch_dx)(cpu, addr + 2, acc);
+    r = ((uint64_t)E50X(vfetch_dx)(cpu, addr, acc) << 32) | E50X(vfetch_dx)(cpu, intraseg_i(addr, 2), acc);
 
   return r;
 }
@@ -613,8 +682,12 @@ static inline uint16_t E50X(vfetch_i)(cpu_t *cpu)
   }
   else
   {
+#if defined V_MODE || defined I_MODE
     uint16_t r = to_be_16(E50X(vfetch_wx)(cpu, cpu->exec, acc_ex));
-    cpu->exec++;
+#else
+    uint16_t r = to_be_16(E50X(vfetch_wx)(cpu, cpu->ep, acc_ex));
+#endif
+    cpu->ep++;
     return r;
   }
 }
@@ -627,20 +700,29 @@ uint16_t r;
   if(!cpu->exec)
   {
 #if defined V_MODE || defined I_MODE
-    r = to_be_16(E50X(vfetch_wx)(cpu, cpu->pb, acc_ex));
-    cpu->p++;
+    r = E50X(vfetch_wx)(cpu, cpu->pb, acc_ex);
 #else
-    r = to_be_16(E50X(vfetch_wx)(cpu, cpu->p, acc_ex));
-    cpu->p++;
+    r = E50X(vfetch_wx)(cpu, cpu->p, acc_ex);
 #endif
+    cpu->p++;
   }
   else
   {
-    r = to_be_16(E50X(vfetch_wx)(cpu, cpu->exec, acc_ex));
-    cpu->exec++;
+#if defined V_MODE || defined I_MODE
+    r = E50X(vfetch_wx)(cpu, cpu->exec, acc_ex);
+#else
+    r = E50X(vfetch_wx)(cpu, cpu->ep, acc_ex);
+#endif
+    cpu->ep++;
   }
 
   return r;
+}
+
+
+static inline uint16_t E50X(vfetch_iw_be)(cpu_t *cpu)
+{
+  return to_be_16(E50X(vfetch_iw)(cpu));
 }
 
 
@@ -649,19 +731,29 @@ static inline uint32_t E50X(vfetch_id)(cpu_t *cpu)
   if(!cpu->exec)
   {
 #if defined V_MODE || defined I_MODE
-    uint32_t r = to_be_32(E50X(vfetch_dx)(cpu, cpu->pb, acc_ex));
+    uint32_t r = E50X(vfetch_dx)(cpu, cpu->pb, acc_ex);
 #else
-    uint32_t r = to_be_32(E50X(vfetch_dx)(cpu, cpu->p, acc_ex));
+    uint32_t r = E50X(vfetch_dx)(cpu, cpu->p, acc_ex);
 #endif
     cpu->p += 2;
     return r;
   }
   else
   {
-    uint32_t r = to_be_32(E50X(vfetch_dx)(cpu, cpu->exec, acc_ex));
-    cpu->exec += 2;
+#if defined V_MODE || defined I_MODE
+    uint32_t r = E50X(vfetch_dx)(cpu, cpu->exec, acc_ex);
+#else
+    uint32_t r = E50X(vfetch_dx)(cpu, cpu->ep, acc_ex);
+#endif
+    cpu->ep += 2;
     return r;
   }
+}
+
+
+static inline uint32_t E50X(vfetch_id_be)(cpu_t *cpu)
+{
+  return to_be_32(E50X(vfetch_id)(cpu));
 }
 
 
@@ -692,7 +784,7 @@ logmsg("\n\n*** " E50S " %4.4x vstore_d %8.8x %8.8x %s***\n\n", cpu->crs->ownerl
   else
   {
     E50X(vstore_wx)(cpu, addr, val >> 16, acc);
-    E50X(vstore_wx)(cpu, addr + 1, val, acc);
+    E50X(vstore_wx)(cpu, intraseg_i(addr, 1), val, acc);
   }
 }
 
@@ -714,7 +806,7 @@ logmsg("\n\n*** " E50S " %4.4x vstore_q %8.8x %16.16jx %s***\n\n", cpu->crs->own
   else
   {
     E50X(vstore_dx)(cpu, addr, val >> 32, acc);
-    E50X(vstore_dx)(cpu, addr + 2, val, acc);
+    E50X(vstore_dx)(cpu, intraseg_i(addr, 2), val, acc);
   }
 }
 
@@ -727,44 +819,37 @@ static inline void E50X(vstore_q)(cpu_t *cpu, uint32_t addr, uint64_t val)
 
 static inline uint16_t E50X(vfetch_is)(cpu_t *cpu, uint16_t addr)
 {
-  ATON(cpu, WXX(addr));
+#if defined E16S || defined E32S || defined E32R
+  int n = 8;
+  do {
+#endif
 
-  uint16_t r = E50X(vfetch_w)(cpu, ISAT(cpu, addr) ? addr : (cpu->b << 16) | addr);
+    ATON(cpu, WXX(addr));
+    addr = E50X(vfetch_w)(cpu, ISAT(cpu, addr) ? addr : (cpu->b << 16) | addr);
 
 #if defined E16S || defined E32S || defined E32R
 
 #if defined E16S
-  if((r & 0x4000))
-      r += G_X(cpu);
-#endif
-
-  int n = 128;
-  while(ad_i(r))
-  {
-    ATON(cpu, WXX(r));
-
-    r = E50X(vfetch_w)(cpu, ISAT(cpu, r) ? r : (cpu->b << 16) | r);
-
-#if defined E16S
-    if((r & 0x4000))
-      r += G_X(cpu);
+    if(ad_x(addr))
+      addr += G_X(cpu);
 #endif
 
     if(--n < 0)
-      E50X(uii_fault)(cpu, 0);   // FIXME TODO GUESS
+      E50X(rxm_fault)(cpu);
 
-  }
+  } while(ad_i(addr));
 #endif
 
-logmsg("\n\nIndirect short *** %4.4x:%4.4x:%4.4x ***\n\n", (addr<<1), addr, r);
+logmsg("\n\nIndirect short *** %4.4x:%4.4x ***\n\n", (addr<<1), addr);
 
-  return r;
+  return addr;
 }
 
 
 static inline uint32_t E50X(vfetch_il)(cpu_t *cpu, uint32_t addr)
 {
-uint32_t i = E50X(vfetch_d)(cpu, addr);
+  addr |= cpu->pb & ea_r;
+  uint32_t i = E50X(vfetch_d)(cpu, addr) | (addr & ea_r);
 
 logmsg("\n\nIndirect long *** %4.4x:%4.4x:%8.8x ***\n\n", (addr<<1), addr, i);
 
@@ -779,7 +864,7 @@ static inline uint32_t E50X(fetch_ap)(cpu_t *cpu, uint8_t *ptr, uint16_t *bit)
 {
 uint32_t ap = fetch_d(ptr);
 int b = (ap >> 24) & 0b11;
-uint32_t a = intraseg_i(G_ZB(cpu, b), (ap & 0x00ffffff));
+uint32_t a = intraseg_i(G_ZB(cpu, b), (ap & 0x00ffffff)) | (cpu->pb & ea_r);
 
 logmsg("\n\nAP *** %8.8x %6.6X(%d)***\n\n", ap, ap & 0x00ffffff, b);
 
@@ -788,7 +873,7 @@ logmsg("\n\nAP *** %8.8x %6.6X(%d)***\n\n", ap, ap & 0x00ffffff, b);
     uint32_t i = E50X(vfetch_il)(cpu, a);
 
     if(bit)
-      *bit = (i & ea_e) ? (E50X(vfetch_w)(cpu, a+2) >> 12) : 0;
+      *bit = (i & ea_e) ? (E50X(vfetch_w)(cpu, intraseg_i(a, 2)) >> 12) : 0;
 
 logmsg("\n\nIndirect ap *** %8.8x:%4.4x ***\n\n", i, bit ? *bit : 0);
 
@@ -808,7 +893,7 @@ logmsg("\n\nap *** %8.8x ***\n\n", a);
 
 static inline uint32_t E50X(vfetch_iap)(cpu_t *cpu, uint16_t *bit)
 {
-  cpu->arg_ap = E50X(vfetch_id)(cpu);
+  cpu->arg_ap = E50X(vfetch_id_be)(cpu);
 
   return E50X(fetch_ap)(cpu, cpu->op + 2, bit);
 }

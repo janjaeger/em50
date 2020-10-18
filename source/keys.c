@@ -52,8 +52,12 @@ E50I(otk)
 {
   logop1(op, "otk");
 
-  S_KEYS(cpu, G_A(cpu));
-  cpu->crs->km.in = cpu->crs->km.sd = 0;
+  uint16_t a = G_A(cpu);
+  uint16_t k = G_KEYS(cpu);
+
+  k = (k & 0x00ff) | (a & 0xff00);
+  S_KEYS(cpu, k);
+  S_VSC(cpu, a & 0xff);
 
   set_cpu_mode(cpu, cpu->crs->km.mode);
 }
@@ -89,14 +93,14 @@ E50I(tak)
 #endif
 
 
-#if defined V_MODE || defined R_MODE || defined S_MODE
+//#if defined V_MODE || defined R_MODE || defined S_MODE
 E50I(tka)
 {
   logop1(op, "tka");
 
   S_A(cpu, G_KEYS(cpu));
 }
-#endif
+//#endif
 
 
 #if defined I_MODE

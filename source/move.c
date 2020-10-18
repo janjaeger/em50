@@ -60,6 +60,7 @@ uint16_t offset = E50X(ea)(cpu, op);
   E50X(store_rs)(cpu, offset, G_L(cpu));
 }
 
+
 #ifdef I_MODE
 E50I(ldar)
 {
@@ -354,6 +355,7 @@ uint16_t s = E50X(vfetch_w)(cpu, ap);
   }
   else
     cpu->crs->km.eq = 0;
+  cpu->crs->km.lt = 0;
 }
 
 
@@ -373,6 +375,7 @@ uint32_t s = E50X(vfetch_d)(cpu, ap);
   }
   else
     cpu->crs->km.eq = 0;
+  cpu->crs->km.lt = 0;
 }
 
 
@@ -393,6 +396,7 @@ uint16_t s = E50X(vfetch_w)(cpu, ap);
   }
   else
     cpu->crs->km.eq = 0;
+  cpu->crs->km.lt = 0;
 }
 #endif
 
@@ -405,7 +409,7 @@ uint32_t ap = E50X(vfetch_iap)(cpu, NULL);
 uint32_t r1 = G_R(cpu, (dr + 1) & 7);
 uint32_t s = E50X(vfetch_d)(cpu, ap);
 
-  logop1o(op, "stlc", ap);
+  logop1o(op, "stcd", ap);
 
   if(r1 == s)
   {
@@ -414,6 +418,7 @@ uint32_t s = E50X(vfetch_d)(cpu, ap);
   }
   else
     cpu->crs->km.eq = 0;
+  cpu->crs->km.lt = 0;
 }
 #endif
 

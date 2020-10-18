@@ -36,7 +36,7 @@
 typedef struct cpumodel_t {
   const char *name;
   uint16_t number;
-  enum { hmap=0, pmt=1 } have_pmt;
+  enum { hmap=0, pmt=1, pmtx=2 } have_pmt;
   int  nrf;
   enum { cslow=0, cshigh=1 } cs_high;
   enum { earlier=0, p750=1, current=2 } ea;
@@ -143,6 +143,14 @@ cpumodel_t *list_cpumodel(const unsigned int);
  || MODEL == P9955II \
  || MODEL >= P6350
  #define em50_have_pmt
+#endif
+
+#if MODEL == P5310   \
+ || MODEL == P5330   \
+ || MODEL == P5370   \
+ || MODEL == P5320   \
+ || MODEL == P5340
+ #define em50_have_pmtx
 #endif
 
 #if MODEL < P750

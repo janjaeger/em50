@@ -38,6 +38,12 @@
 
 
 #if 0
+#undef logall
+#define logall(...) PRINTF(__VA_ARGS__)
+#endif
+
+
+#if 0
 #undef logmsg
 #define logmsg(...) logall(__VA_ARGS__)
 #endif
@@ -53,19 +59,26 @@ static void *ex_chp(void *arg)
 dk_t *dk = arg;
 cpu_t *cpu = dk->cpu;
 
-  dk->stat = DK_STAT_OK;
+  dk->stat |= DK_STAT_OK;
 
   while(1) {
+
+    dm_t *dm = (dk->mhd >= 0) ? &dk->dm[dk->mhd] : NULL;
 
     uint32_t order = ifetch_d(cpu, dk->oar);
     int opcde = order >> 28;
     int mask = (order >> 22) & 0b111111;
 
-    logmsg("disk %03o:%d opcode[%04x] = %08x mask %2.2x %s\n", dk->ctrl, dk->mhd, dk->oar, order, mask, dk_order_name[opcde]);
+    logmsg("disk %03o:%d opcode[%04x] = %08x mask %2.2x stat %04x %s\n", dk->ctrl, dk->mhd, dk->oar, order, mask, dk->stat, dk_order_name[opcde]);
 
-    if(((mask & DK_MEXIF) != 0) ^ (((mask & DK_MDERR) && (dk->stat & (DK_STAT_SEEKERR | DK_STAT_SELERR | DK_STAT_UNAVAIL))) != 0))
+    if(((mask & DK_MEXIF) != 0)
+     ^ ((((mask & DK_MPROT) && (dk->stat & (DK_STAT_WRPROT))) != 0)
+     || (((mask & DK_MCERR) && (dk->stat & (DK_STAT_DMAOVR|DK_STAT_CRCERR|DK_STAT_PARERR|DK_STAT_HDRERR))) != 0)
+     || (((mask & DK_MDERR) && (dk->stat & (DK_STAT_SEEKERR | DK_STAT_SELERR | DK_STAT_UNAVAIL))) != 0)
+     || (((mask & DK_MSEEK) && (dk->stat & (DK_STAT_SEEKING))) != 0)
+     || (((mask & DK_MBUSY) && (dk->stat & (DK_STAT_DPBUSY))) != 0)))
     {
-logmsg("disk %03o:%d skip\n", dk->ctrl, dk->mhd);
+logmsg("disk %03o:%d skip mask %02x stat %4.4x\n", dk->ctrl, dk->mhd, mask, dk->stat);
       switch(opcde) {
         case DK_SFORM:
         case DK_SREAD:
@@ -77,8 +90,8 @@ logmsg("disk %03o:%d skip\n", dk->ctrl, dk->mhd);
       }
     }
     else
-    switch(opcde) {
-
+      switch(opcde) {
+ 
       uint32_t track;
       uint32_t record;
       uint32_t head;
@@ -87,23 +100,31 @@ logmsg("disk %03o:%d skip\n", dk->ctrl, dk->mhd);
 
       case DK_DHLT:
         dk->oar += 2;
+        dk->stat &= ~DK_STAT_SEEKING;
 logmsg("disk %03o:%d stat %4.4x\n", dk->ctrl, dk->mhd, dk->stat);
         return NULL;
         break;
 
       case DK_SFORM:
-        if(dk->mhd >= 0)
+        dk->stat &= ~(DK_STAT_SEEKING|DK_STAT_CRCERR);
+        if(dm)
         {
           ext = ifetch_w(cpu, dk->oar+2);
           size = recsize[(order >> 16) & 0xf];
 //        off_t off = order >> 28;
-//        sr = (order >> 27) & 1;
+//        int sr = (order >> 27) & 1;
           track = order & 0x7ff;
           record = ext >> 8;
-          head = ext & 0xff; // TODO MAYBE 1F
-          logmsg("disk %03o:%d sform %4.4x %4.4x size %u head %u track %u records %u\n",
-            dk->ctrl, dk->mhd, order & 0xffff, ext, size, head, track, record);
-          dk->stat |= dk_format(&dk->dm[dk->mhd], size, head, track, record);
+          head = ext & 0xff;
+          if(track == 0x7ff || head == 0xff)
+            dk->stat |= DK_STAT_UNAVAIL;
+          else
+          {
+            dm->seek = track;
+            dk->stat |= dk_format(dm, size, head, track, record);
+          }
+          logmsg("disk %03o:%d sform %4.4x %4.4x size %u head %u track %u records %u stat %4.4x\n",
+            dk->ctrl, dk->mhd, order & 0xffff, ext, size, head, track, record, dk->stat);
         }
         else
           dk->stat |= DK_STAT_SELERR;
@@ -111,11 +132,27 @@ logmsg("disk %03o:%d stat %4.4x\n", dk->ctrl, dk->mhd, dk->stat);
         break;
 
       case DK_SSEEK:
+        if(dm)
+        {
+          dk->stat &= ~(DK_STAT_SEEKERR);
+          if((order & 0x4000))
+            dk->stat = DK_STAT_OK;
+          else
+          {
+            dk->stat |= DK_STAT_SEEKING;
+            uint32_t seek = dm->seek = (order & 0x8000) ? 0 : order & 0x07ff;
+            if(seek == 0x07ff || (!dm->formatting && !dk_off(dm, dm->size, 0, seek, 0)))
+              dk->stat |= DK_STAT_SEEKERR;
+          }
+        }
+        else
+          dk->stat |= DK_STAT_SELERR;
         dk->oar += 2;
         break;
 
       case DK_DSEL:
         dk->oar += 2;
+        dk->stat &= ~(DK_STAT_SEEKING|DK_STAT_SELERR);
         dk->mhd = dk_unit(order);
         if(dk->mhd >= 0)
         {
@@ -128,24 +165,42 @@ logmsg("disk %03o:%d stat %4.4x\n", dk->ctrl, dk->mhd, dk->stat);
         break;
 
       case DK_SREAD:
-        if(dk->mhd >= 0)
+        dk->stat &= ~(DK_STAT_SEEKING|DK_STAT_CRCERR);
+        if(dm)
         {
           ext = ifetch_w(cpu, dk->oar+2);
           size = recsize[(order >> 16) & 0xf];
 //        off_t off = order >> 28;
-//        sr = (order >> 27) & 1;
+//        int sr = (order >> 27) & 1;
           track = order & 0x7ff;
           record = ext >> 8;
-          head = ext & 0xff; // TODO MAYBE 1F
+          head = ext & 0xff;
 #ifdef DEBUG
           uint16_t addr = G_DMA_A(cpu, dk->ca);
           logmsg("disk %03o:%d sread %4.4x %4.4x addr %4.4x size %u head %u track %u record %u\n",
             dk->ctrl, dk->mhd, order & 0xffff, ext, addr, size, head, track, record);
 #endif
-          uint8_t buffer[size<<1];
-          dk->stat |= dk_read(&dk->dm[dk->mhd], buffer, size, head, track, record);
-          if(dk->stat == DK_STAT_OK)
-            io_dma_copy(cpu, dk->ca, dk->cn, buffer, size<<1, 0);
+#if 0
+          if(((dm->seek > track) ? (dm->seek - track) : (track - dm->seek)) > 127)
+#else
+          if(dm->seek == 0 && track >= dm->tracks - 1)
+#endif
+            dk->stat |= DK_STAT_HDRERR;
+          else if(size)
+          {
+            dm->seek = track;
+            dk->stat |= dk_read(dm, (uint8_t*)dk->bf, (order & 0x0800) ? dm->size : size, head, track, record);
+            if(dk->stat == DK_STAT_OK)
+              io_dma_copy(cpu, dk->ca, dk->cn, (uint8_t*)dk->bf, (size < dm->size ? size : dm->size)<<1, 0, NULL);
+          }
+          else
+          {
+            dk->stat |= DK_STAT_CRCERR;
+            dk_read(dm, (uint8_t*)dk->bf, dm->size, head, track, record);
+            dk->bf[dm->size] = ntohs(0144777U);   // TODO CALCULATE CRC
+            dk->bf[dm->size+1] = ntohs(0050743U); // TODO WHAT POLINOMAL TO USE
+            io_dma_copy(cpu, dk->ca, dk->cn, (uint8_t*)dk->bf, ((dm->size+2)<<1), 0, NULL);
+          }
         }
         else
           dk->stat |= DK_STAT_SELERR;
@@ -153,23 +208,24 @@ logmsg("disk %03o:%d stat %4.4x\n", dk->ctrl, dk->mhd, dk->stat);
         break;
 
       case DK_SWRITE:
-        if(dk->mhd >= 0)
+        dk->stat &= ~(DK_STAT_SEEKING|DK_STAT_CRCERR);
+        if(dm)
         {
           ext = ifetch_w(cpu, dk->oar+2);
           size = recsize[(order >> 16) & 0xf];
 //        off_t off = order >> 28;
-//        sr = (order >> 27) & 1;
+//        int sr = (order >> 27) & 1;
           track = order & 0x7ff;
           record = ext >> 8;
-          head = ext & 0xff; // TODO MAYBE 1F
+          head = ext & 0xff;
 #ifdef DEBUG
           uint16_t addr = G_DMA_A(cpu, dk->ca);
           logmsg("disk %03o:%d swrit %4.4x %4.4x addr %4.4x size %u head %u track %u record %u\n",
             dk->ctrl, dk->mhd, order & 0xffff, ext, addr, size, head, track, record);
 #endif
-          uint8_t buffer[size<<1];
-          io_dma_copy(cpu, dk->ca, dk->cn, buffer, size<<1, 1);
-          dk->stat |= dk_write(&dk->dm[dk->mhd], buffer, size, head, track, record);
+          dm->seek = track;
+          io_dma_copy(cpu, dk->ca, dk->cn, (uint8_t*)dk->bf, size<<1, 1, NULL);
+          dk->stat |= dk_write(dm, (uint8_t*)dk->bf, size, head, track, record);
         }
         else
           dk->stat |= DK_STAT_SELERR;
@@ -179,25 +235,38 @@ logmsg("disk %03o:%d stat %4.4x\n", dk->ctrl, dk->mhd, dk->stat);
       case DK_DSTALL:
         dk->oar += 2;
         usleep(210ULL);
+        dk->stat &= ~DK_STAT_SEEKING;
         break;
 
       case DK_DSTAT:
         dk->oar += 2;
 logmsg("disk %03o:%d stat %4.4x\n", dk->ctrl, dk->mhd, dk->stat);
         istore_w(cpu, order & 0xffff, dk->stat);
+        dk->stat &= ~DK_STAT_SEEKING;
         break;
 
       case DK_SSTOR:
         dk->oar += 2;
+        if(!((order >> 16) & 1))
+          dk->bp = 0;
+        istore_w(cpu, order & 0xffff, dk->bf[dk->bp]);
+        if(((order >> 16) & 1) && (++dk->bp >= DK_BUFFS))
+          dk->bp = 0;
         break;
 
       case DK_DOAR:
         dk->oar += 2;
+logmsg("disk %03o:%d doar %4.4x\n", dk->ctrl, dk->mhd, dk->oar);
         istore_w(cpu, order & 0xffff, dk->oar);
         break;
 
       case DK_SLOAD:
         dk->oar += 2;
+        if(!((order >> 16) & 1))
+          dk->bp = 0;
+        dk->bf[dk->bp] = ifetch_w(cpu, order & 0xffff);
+        if(((order >> 16) & 1) && (++dk->bp >= DK_BUFFS))
+          dk->bp = 0;
         break;
 
       case DK_SDMA:
@@ -209,7 +278,6 @@ logmsg("disk %03o:%d stat %4.4x\n", dk->ctrl, dk->mhd, dk->stat);
       case DK_DINT:
         dk->oar += 2;
         io_setintv(cpu, &dk->intr, order & 0xffff);
-        return NULL; // suspend
         break;
 
       case DK_DTRAN:
@@ -218,6 +286,7 @@ logmsg("disk %03o:%d stat %4.4x\n", dk->ctrl, dk->mhd, dk->stat);
 
       default:
         dk->oar += 2;
+        dk->busy = 1;
     }
   }
 }
@@ -230,6 +299,11 @@ dk_t *dk = parm;
   char tname[16];
   snprintf(tname, sizeof(tname), "disk %03o", dk->ctrl);
   pthread_setname_np(pthread_self(), tname);
+  sigset_t set;
+  sigemptyset(&set);
+  sigaddset(&set, SIGINT);
+  sigaddset(&set, SIGTSTP);
+  pthread_sigmask(SIG_BLOCK, &set, NULL);
 
   pthread_mutex_lock(&dk->pthread.mutex);
   while(dk->pthread.tid)
@@ -289,6 +363,10 @@ dk_t *dk = *devparm;
             pthread_cond_signal(&dk->pthread.cond);
           break;
         case 017: // Initialize
+          logmsg("disk %03o Reset\n", ctrl);
+          dk->busy = 0;
+          dk->stat = DK_STAT_OK;
+          io_clrint(cpu, &dk->intr);
           break;
         default:
           logall("disk %03o unsupported OCP order %03o\n", ctrl, func);
@@ -318,6 +396,7 @@ dk_t *dk = *devparm;
 #endif
       switch(func) {
         case 011: // Input ID
+          logmsg("disk %03o Input ID\n", ctrl);
           S_A(cpu, dk->id);
           break;
         case 017: // Input Order Address Register
@@ -365,19 +444,36 @@ dk_t *dk = *devparm;
     case IO_TYPE_CLS:
       break;
     case IO_TYPE_ASN:
-      if(argc > 0)
+      if(ext >= DK_UNITS)
+        printf("Invalid unit (%o)\n", ext);
+      else if(argc > 0)
       {
         pthread_mutex_lock(&dk->pthread.mutex);
-        if(dk->dm[ext].fn)
-          free(dk->dm[ext].fn);
-        dk->dm[ext].fn =  strdup(argv[0]);
         dk_close(&dk->dm[ext]);
+
+	if(strcmp(argv[0], "*"))
+	{
+          if(dk->dm[ext].fn)
+            free(dk->dm[ext].fn);
+          dk->dm[ext].fn =  strdup(argv[0]);
+	}
+
+        if(argc > 1)
+        {
+          int sizecode;
+	  if(argc > 2)
+            sizecode = a2i(argv[2]);
+	  else
+            sizecode = 0;
+          dk_crnew(&dk->dm[ext], argv[1], sizecode);
+        }
+
         isfile(dk->dm[ext].fn);
         pthread_mutex_unlock(&dk->pthread.mutex);
       }
       else
         if(dk->dm[ext].fn)
-          printf("ASSIGN %03o:%1o %s\n", ctrl, ext, dk->dm[ext].fn);
+          printf("ASSIGN %03o:%1o %s%s\n", ctrl, ext, dk->dm[ext].fn, isfilex(dk->dm[ext].fn) ? " (does not exist)" : "");
       break;
     default:
       abort();

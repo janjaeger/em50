@@ -66,9 +66,9 @@ static const ioop_t device[0100] = {
 /*007*/ pnc_io,                  /* 7040 Primenet Node Controller 1 */
 /*010*/ NULL,                    /*      ICS2 1 */
 /*011*/ NULL,                    /*      ICS2 2 */
-/*012*/ NULL,                    /* 4300 Floppy Disk */
-/*013*/ tape_io,                 /* 4020 MT2 */
-/*014*/ tape_io,                 /* 4020 MT1 */
+/*012*/ tape_io,                 /* 4020 MT 8-11 WAS: 4300 Floppy Disk */
+/*013*/ tape_io,                 /* 4020 MT 4-7 */
+/*014*/ tape_io,                 /* 4020 MT 0-4 */
 /*015*/ NULL,                    /* 5000 AMLC 5 */
 /*016*/ NULL,                    /* 5000 AMLC 6 */
 /*017*/ NULL,                    /* 5000 AMLC 7 */
@@ -304,7 +304,7 @@ E50I(enb)
 
   cpu->crs->km.ie = 1;
 
-  longjmp(cpu->endop, endop_nointr5); // FIXME nointr1
+  longjmp(cpu->endop, endop_nointr1);
 }
 
 
@@ -316,7 +316,7 @@ E50I(enbm)
 
   cpu->crs->km.ie = 1;
 
-  longjmp(cpu->endop, endop_nointr5); // FIXME unkown
+  longjmp(cpu->endop, endop_nointr1);
 }
 
 
@@ -328,7 +328,7 @@ E50I(enbp)
 
   cpu->crs->km.ie = 1;
 
-  longjmp(cpu->endop, endop_nointr5); // FIXME unkown
+  longjmp(cpu->endop, endop_nointr1); // FIXME unkown
 }
 
 
@@ -340,7 +340,7 @@ E50I(esim)
 
   cpu->crs->km.vim = 0;
 
-  longjmp(cpu->endop, endop_nointr5); // FIXME nointr1
+  longjmp(cpu->endop, endop_nointr1);
 }
 
 
@@ -352,7 +352,7 @@ E50I(evim)
 
   cpu->crs->km.vim = 1;
 
-  longjmp(cpu->endop, endop_nointr5); // FIXME nointr1
+  longjmp(cpu->endop, endop_nointr1);
 }
 
 
@@ -365,73 +365,56 @@ E50I(cai)
   if(cpu->crs->km.vim)
   {
     io_clrai(cpu);
-    longjmp(cpu->endop, endop_nointr5); // FIXME nointr1
+    longjmp(cpu->endop, endop_nointr1);
   }
 }
 
 
 #ifdef HMDE
-static inline int32_t i2a(cpu_t *cpu, uint32_t vaddr)
+int32_t c2r(cpu_t *cpu, uint32_t vaddr)
 {
-cpu_t tmp = *cpu;
-
-  if(!setjmp(tmp.endop))
-    return E50X(v2r)(&tmp, vaddr, acc_io);
-  else
-    return -1;
+  return i2r(cpu, vaddr);
 }
 
-int32_t i2r(cpu_t *cpu, uint32_t vaddr)
+void istore_w(cpu_t *cpu, uint32_t vaddr, uint16_t val)
 {
-int32_t r = cpu->iotlb.i[IOTLB_INDEX(vaddr)] | (vaddr & em50_page_offm);
+int32_t raddr = i2r(cpu, vaddr);
 
-logmsg("i2r [%d] %8.8x %8.8x", IOTLB_INDEX(vaddr), vaddr, r);
-  if(r < 0)
-  {
-    r = i2a(cpu, vaddr);
-logmsg(" %8.8x\n", r);
+  if(raddr >= 0)
+    store_w(physad(cpu, raddr), val);
 
-    if(r >= 0)
-      cpu->iotlb.i[IOTLB_INDEX(vaddr)] = r & em50_page_mask;
-  }
-
-  return r;
+  logmsg("istore_w %8.8x %8.8x %4.4x\n", vaddr, raddr, val);
 }
 
 
-void istore_w(cpu_t *cpu, uint32_t addr, uint16_t val)
+void istore_d(cpu_t *cpu, uint32_t vaddr, uint32_t val)
 {
-  if(cpu->crs->km.mio)
-    addr = i2r(cpu, addr);
-    logmsg("istore_w %8.8x %4.4x\n", addr, val);
-  store_w(physad(cpu, addr), val);
+int32_t raddr = i2r(cpu, vaddr);
+
+  if(raddr >= 0)
+    store_d(physad(cpu, raddr), val);
+
+  logmsg("istore_d %8.8x %8.8x %8.8x\n", vaddr, raddr, val);
 }
 
 
-void istore_d(cpu_t *cpu, uint32_t addr, uint32_t val)
+uint16_t ifetch_w(cpu_t *cpu, uint32_t vaddr)
 {
-  if(cpu->crs->km.mio)
-    addr = i2r(cpu, addr);
-  logmsg("istore_d %8.8x %8.8x\n", addr, val);
-  store_d(physad(cpu, addr), val);
+int32_t raddr = i2r(cpu, vaddr);
+
+  logmsg("ifetch_w %8.8x %8.8x %4.4x\n", vaddr, raddr, fetch_w(physad(cpu, vaddr)));
+
+  return (raddr >= 0) ? fetch_w(physad(cpu, raddr)) : 0;
 }
 
 
-uint16_t ifetch_w(cpu_t *cpu, uint32_t addr)
+uint32_t ifetch_d(cpu_t *cpu, uint32_t vaddr)
 {
-  if(cpu->crs->km.mio)
-    addr = i2r(cpu, addr);
-  logmsg("ifetch_w %8.8x %4.4x\n", addr, fetch_w(physad(cpu, addr)));
-  return fetch_w(physad(cpu, addr));
-}
+int32_t raddr = i2r(cpu, vaddr);
 
+  logmsg("ifetch_d %8.8x %8.8x %8.8x\n", vaddr, raddr, fetch_w(physad(cpu, vaddr)));
 
-uint32_t ifetch_d(cpu_t *cpu, uint32_t addr)
-{
-  if(cpu->crs->km.mio)
-    addr = i2r(cpu, addr);
-  logmsg("ifetch_d %8.8x %8.8x\n", addr, fetch_d(physad(cpu, addr)));
-  return fetch_d(physad(cpu, addr));
+  return (raddr >= 0) ? fetch_d(physad(cpu, raddr)) : 0;
 }
 
 #endif

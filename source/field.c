@@ -45,7 +45,7 @@ int f = FAR(op);
 
   logop2oo(op, "eafa", f, ap);
 
-  S_FAR(cpu, f, ap & ~ea_e);
+  S_FAR(cpu, f, ap);
   S_FBR(cpu, f, bit);
 
   logmsg("-> far%d %8.8x flr %8.8x fbr %d\n", f, G_FAR(cpu, f), G_FLR(cpu, f), G_FBR(cpu, f));
@@ -64,10 +64,10 @@ int bit = G_FBR(cpu, f);
   if(bit)
   {
     E50X(vstore_d)(cpu, ap, far | ea_e);
-    E50X(vstore_w)(cpu, ap + 2, bit << 12);
+    E50X(vstore_w)(cpu, intraseg_i(ap, 2), bit << 12);
   }
   else
-    E50X(vstore_d)(cpu, ap, far);
+    E50X(vstore_d)(cpu, ap, far & ~ea_e);
 
   logmsg("-> far%d %8.8x flr %8.8x fbr %d\n", f, G_FAR(cpu, f), G_FLR(cpu, f), G_FBR(cpu, f));
 }
@@ -130,13 +130,8 @@ int bit = G_FBR(cpu, f);
 
 E50I(lfli)
 {
-#if 0
-cpu->arg = vfetch_iw(cpu);
-uint16_t im = fetch_w(op + 2);
-#else
-uint16_t im = E50X(vfetch_w)(cpu, cpu->pb); cpu->p++;
-#endif
 int f = FAR(op);
+uint16_t im = E50X(vfetch_iw)(cpu);
 
   logop2oo(op, "lfli", f, im);
 

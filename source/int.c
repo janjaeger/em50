@@ -84,26 +84,23 @@ E50I(chs)
 #ifndef I_MODE
 E50I(a1a)
 {
-int16_t a = (int16_t)G_A(cpu);
-int16_t r;
-int ovf, car;
+uint16_t a = G_A(cpu);
+uint16_t r;
+int eq, lt, car, ovf;
 
   logop1(op, "a1a");
 
-  r = add_w(a, 1, &ovf, &car);
+  r = add_w(a, 1, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
  
   S_A(cpu, r);
 
   if(ovf)
-  {
-    SET_CC(cpu, a);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, r);
 }
 #endif
 
@@ -115,26 +112,23 @@ int ovf, car;
 #ifndef I_MODE
 E50I(a2a)
 {
-int16_t a = (int16_t)G_A(cpu);
-int16_t r;
-int ovf, car;
+uint16_t a = G_A(cpu);
+uint16_t r;
+int eq, lt, car, ovf;
 
   logop1(op, "a2a");
 
-  r = add_w(a, 2, &ovf, &car);
+  r = add_w(a, 2, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_A(cpu, r);
 
   if(ovf)
-  {
-    SET_CC(cpu, a);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, r);
 }
 #endif
 
@@ -146,26 +140,23 @@ int ovf, car;
 #ifndef I_MODE
 E50I(aca)
 {
-int16_t a = (int16_t)G_A(cpu);
-int16_t r;
-int ovf, car;
+uint16_t a = G_A(cpu);
+uint16_t r;
+int eq, lt, car, ovf;
 
   logop1(op, "aca");
 
-  r = add_w(a, cpu->crs->km.cbit ? 1 : 0, &ovf, &car);
+  r = add_w(a, cpu->crs->km.cbit ? 1 : 0, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_A(cpu, r);
 
   if(ovf)
-  {
-    SET_CC(cpu, a);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, r);
 }
 #endif
 
@@ -182,62 +173,49 @@ int ovf, car;
 E50I(add)
 {
 uint32_t ea = E50X(ea)(cpu, op);
-int ovf, car;
 #if defined S_MODE || defined R_MODE
   if(cpu->crs->km.dp)
   {
-  int32_t s = (int32_t)E50X(vfetch_d)(cpu, ea);
-  s = to31(s);
-  int32_t l = (int32_t)G_L(cpu);
-  uint32_t b1 = l & 0x00008000;
-  l = to31(l);
+  uint32_t s = (int32_t)E50X(vfetch_d)(cpu, ea);
+  uint32_t l = (int32_t)G_L(cpu);
   int32_t r;
+  int eq, lt, car, ovf;
 
     logopxoo(op, "dad", ea, (uint32_t)l);
 
-    r = add_d31(l, s, &ovf, &car);
+    r = add_d31(l, s, &eq, &lt, &car, &ovf);
 
-    cpu->crs->km.cbit = ovf;
+    cpu->crs->km.eq = eq;
+    cpu->crs->km.lt = lt;
     cpu->crs->km.link = car;
+    cpu->crs->km.cbit = ovf;
 
-    r = from31(r);
-    r |= b1;
     S_L(cpu, r);
 
     if(ovf)
-    {
-      SET_CC(cpu, l);
       E50X(int_ovf)(cpu);
-    }
-    else
-      SET_CC(cpu, r);
   }
   else
 #endif
   {
-  int16_t s = (int16_t)E50X(vfetch_w)(cpu, ea);
-  int16_t a = (int16_t)G_A(cpu);
-  int16_t r;
+  uint16_t s = E50X(vfetch_w)(cpu, ea);
+  uint16_t a = G_A(cpu);
+  uint16_t r;
+  int eq, lt, car, ovf;
 
-    logopxoo(op, "add", ea, (uint16_t)s);
+    logopxoo(op, "add", ea, s);
 
-    r = add_w(a, s, &ovf, &car);
+    r = add_w(a, s, &eq, &lt, &car, &ovf);
 
-    cpu->crs->km.cbit = ovf;
+    cpu->crs->km.eq = eq;
+    cpu->crs->km.lt = lt;
     cpu->crs->km.link = car;
+    cpu->crs->km.cbit = ovf;
 
     S_A(cpu, r);
 
     if(ovf)
-    {
-      if(a != -32768 || s != -32768)
-        SET_CC(cpu, a);
-      else
-        cpu->crs->km.eq = cpu->crs->km.lt = 1;
       E50X(int_ovf)(cpu);
-    }
-    else
-      SET_CC(cpu, r);
   }
 }
 #endif
@@ -252,30 +230,24 @@ int ovf, car;
 E50I(adl)
 {
 uint32_t ea = E50X(ea)(cpu, op);
-int32_t s = (int32_t)E50X(vfetch_d)(cpu, ea);
-int32_t l = (int32_t)G_L(cpu);
-int32_t r;
-int ovf, car;
+uint32_t s = E50X(vfetch_d)(cpu, ea);
+uint32_t l = G_L(cpu);
+uint32_t r;
+int eq, lt, car, ovf;
 
-  logopxoo(op, "adl", ea, (uint32_t)s);
+  logopxoo(op, "adl", ea, s);
 
-  r = add_d(l, s, &ovf, &car);
+  r = add_d(l, s, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_L(cpu, r);
 
   if(ovf)
-  {
-      if(l != -2147483648 || s != -2147483648)
-        SET_CC(cpu, l);
-      else
-        cpu->crs->km.eq = cpu->crs->km.lt = 1;
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, r);
 }
 #endif
 
@@ -287,127 +259,112 @@ int ovf, car;
 #ifdef V_MODE
 E50I(adll)
 {
-int32_t l = (int32_t)G_L(cpu);
-int32_t r;
-int ovf, car;
+uint32_t l = G_L(cpu);
+uint32_t r;
+int eq, lt, car, ovf;
 
   logop1(op, "adll");
 
-  r = add_d(l, cpu->crs->km.link ? 1 : 0, &ovf, &car);
+  r = add_d(l, cpu->crs->km.link ? 1 : 0, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_L(cpu, r);
 
   if(ovf)
-  {
-    SET_CC(cpu, l);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, r);
 }
 #endif
 
 
 E50I(s1a)
 {
-int16_t a = (int16_t)G_A(cpu);
-int16_t r;
-int ovf, car;
+uint16_t a = G_A(cpu);
+uint16_t r;
+int eq, lt, car, ovf;
 
   logop1(op, "s1a");
 
-  r = sub_w(a, 1, &ovf, &car);
+  r = sba_w(a, 1, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_A(cpu, r);
 
   if(ovf)
-  {
-    SET_CC(cpu, a);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, r);
 }
 
 
 E50I(s2a)
 {
-int16_t a = (int16_t)G_A(cpu);
-int16_t r;
-int ovf, car;
+uint16_t a = G_A(cpu);
+uint16_t r;
+int eq, lt, car, ovf;
 
   logop1(op, "s2a");
 
-  r = sub_w(a, 2, &ovf, &car);
+  r = sba_w(a, 2, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_A(cpu, r);
 
   if(ovf)
-  {
-    SET_CC(cpu, a);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, r);
 }
 
 
 E50I(tca)
 {
-int16_t a = (int16_t)G_A(cpu);
-int16_t r;
-int ovf, car;
+uint16_t a = G_A(cpu);
+uint16_t r;
+int eq, lt, car, ovf;
 
   logop1(op, "tca");
 
-  r = sub_w(0, a, &ovf, &car);
+  r = sba_w(0, a, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_A(cpu, r);
 
   if(ovf)
-  {
-    SET_CC(cpu, 1);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, r);
 }
 
 
 E50I(tcl)
 {
-int32_t l = (int32_t)G_L(cpu);
-int32_t r;
-int ovf, car;
+uint32_t l = G_L(cpu);
+uint32_t r;
+int eq, lt, car, ovf;
 
   logop1(op, "tcl");
 
-  r = sub_d(0, l, &ovf, &car);
+  r = sba_d(0, l, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_L(cpu, r);
 
   if(ovf)
-  {
-    SET_CC(cpu, 1);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, r);
 }
 
 
@@ -441,60 +398,46 @@ uint32_t ea = E50X(ea)(cpu, op);
 #if defined S_MODE || defined R_MODE
   if(cpu->crs->km.dp)
   {
-  int32_t s = (int32_t)E50X(vfetch_d)(cpu, ea);
-  s = to31(s);
-  int32_t l = (int32_t)G_L(cpu);
-  uint32_t b1 = l & 0x00008000;
-  l = to31(l);
-  int32_t r;
-  int ovf, car;
+  uint32_t s = (int32_t)E50X(vfetch_d)(cpu, ea);
+  uint32_t l = (int32_t)G_L(cpu);
+  uint32_t r;
+  int eq, lt, car, ovf;
 
     logopxoo(op, "dsb", ea, (uint32_t)l);
 
-    r = sub_d31(l, s, &ovf, &car);
+    r = sba_d31(l, s, &eq, &lt, &car, &ovf);
 
-    cpu->crs->km.cbit = ovf;
+    cpu->crs->km.eq = eq;
+    cpu->crs->km.lt = lt;
     cpu->crs->km.link = car;
+    cpu->crs->km.cbit = ovf;
 
-    r = from31(r);
-    r |= b1;
     S_L(cpu, r);
 
     if(ovf)
-    {
-      SET_CC(cpu, -l);
       E50X(int_ovf)(cpu);
-    }
-    else
-      SET_CC(cpu, r);
   }
   else
 #endif
   {
-  int16_t s = (int16_t)E50X(vfetch_w)(cpu, ea);
-  int16_t a = (int16_t)G_A(cpu);
-  int16_t r;
-  int ovf, car;
+  uint16_t s = E50X(vfetch_w)(cpu, ea);
+  uint16_t a = G_A(cpu);
+  uint16_t r;
+  int eq, lt, car, ovf;
 
-    logopxoo(op, "sub", ea, (uint16_t)s);
+    logopxoo(op, "sub", ea, s);
 
-    r = sub_w(a, s, &ovf, &car);
+    r = sba_w(a, s, &eq, &lt, &car, &ovf);
 
-    cpu->crs->km.cbit = ovf;
+    cpu->crs->km.eq = eq;
+    cpu->crs->km.lt = lt;
     cpu->crs->km.link = car;
+    cpu->crs->km.cbit = ovf;
 
     S_A(cpu, r);
 
     if(ovf)
-    {
-      if(a == 0 && s == -32768)
-        SET_CC(cpu, 1);
-      else
-        SET_CC(cpu, a);
       E50X(int_ovf)(cpu);
-    }
-    else
-      SET_CC(cpu, r);
   }
 }
 
@@ -502,30 +445,24 @@ uint32_t ea = E50X(ea)(cpu, op);
 E50I(sbl)
 {
 uint32_t ea = E50X(ea)(cpu, op);
-int32_t s = (int32_t)E50X(vfetch_d)(cpu, ea);
-int32_t l = (int32_t)G_L(cpu);
-int32_t r;
-int ovf, car;
+uint32_t s = E50X(vfetch_d)(cpu, ea);
+uint32_t l = G_L(cpu);
+uint32_t r;
+int eq, lt, car, ovf;
 
-  logopxoo(op, "sbl", ea, (uint32_t)s);
+  logopxoo(op, "sbl", ea, s);
 
-  r = sub_d(l, s, &ovf, &car);
+  r = sba_d(l, s, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_L(cpu, r);
 
   if(ovf)
-  {
-    if(l == 0 && s == -2147483648)
-      SET_CC(cpu, 1);
-    else
-      SET_CC(cpu, l);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, r);
 }
 
 
@@ -770,29 +707,23 @@ uint16_t s = 0;
 E50I(a)
 {
 int dr = op_dr(op);
-int32_t r = G_R(cpu, dr);
-int32_t v = E50X(efetch_d)(cpu, op);
-int ovf, car;
+uint32_t r = G_R(cpu, dr);
+uint32_t v = E50X(efetch_d)(cpu, op);
+int eq, lt, car, ovf;
 
   logop2o3(op, "a", dr, r, v);
 
-  int32_t d = add_d(r, v, &ovf, &car);
+  int32_t d = add_d(r, v, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
  
   S_R(cpu, dr, d);
 
   if(ovf)
-  {
-      if(r != -2147483648 || v != -2147483648)
-        SET_CC(cpu, r);
-      else
-        cpu->crs->km.eq = cpu->crs->km.lt = 1;
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, d);
 }
 #endif
 
@@ -801,25 +732,22 @@ int ovf, car;
 E50I(adlr)
 {
 int dr = op_dr(op);
-int32_t r = G_R(cpu, dr);
-int ovf, car;
+uint32_t r = G_R(cpu, dr);
+int eq, lt, car, ovf;
 
   logop2oo(op, "adlr", dr, r);
 
-  int32_t d = add_d(r, cpu->crs->km.link ? 1 : 0, &ovf, &car);
+  uint32_t d = add_d(r, cpu->crs->km.link ? 1 : 0, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
  
   S_R(cpu, dr, d);
 
   if(ovf)
-  {
-    SET_CC(cpu, r);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, d);
 }
 #endif
 
@@ -828,29 +756,23 @@ int ovf, car;
 E50I(ah)
 {
 int dr = op_dr(op);
-int16_t r = G_RH(cpu, dr);
-int16_t v = E50X(efetch_w)(cpu, op);
-int ovf, car;
+uint16_t r = G_RH(cpu, dr);
+uint16_t v = E50X(efetch_w)(cpu, op);
+int eq, lt, car, ovf;
 
   logop2o3(op, "ah", dr, r, v);
 
-  int16_t h = add_w(r, v, &ovf, &car);
+  uint16_t h = add_w(r, v, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
  
   S_RH(cpu, dr, h);
 
   if(ovf)
-  {
-    if(r != -32768 || v != -32768)
-      SET_CC(cpu, r);
-    else
-      cpu->crs->km.eq = cpu->crs->km.lt = 1;
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, h);
 }
 #endif
 
@@ -859,17 +781,17 @@ int ovf, car;
 E50I(c)
 {
 int dr = op_dr(op);
-int32_t r = G_R(cpu, dr);
-int32_t v = E50X(efetch_d)(cpu, op);
+uint32_t r = G_R(cpu, dr);
+uint32_t v = E50X(efetch_d)(cpu, op);
 
-  logop2oo(op, "c", r, v);
+  logop2oo(op, "c", dr, v);
 
-  int ovf, car;
-  sub_d(r, v, &ovf, &car);
+  int eq, lt, car;
+  sba_d(r, v, &eq, &lt, &car, NULL);
 
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
- 
-  _SET_CC(cpu, r, v);
 }
 #endif
 
@@ -878,17 +800,17 @@ int32_t v = E50X(efetch_d)(cpu, op);
 E50I(ch)
 {
 int dr = op_dr(op);
-int16_t r = G_RH(cpu, dr);
-int16_t v = E50X(efetch_w)(cpu, op);
+uint16_t r = G_RH(cpu, dr);
+uint16_t v = E50X(efetch_w)(cpu, op);
 
-  logop2oo(op, "ch", r, v);
+  logop2oo(op, "ch", dr, v);
 
-  int ovf, car;
-  sub_w(r, v, &ovf, &car);
+  int eq, lt, car;
+  sba_w(r, v, &eq, &lt, &car, NULL);
 
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
- 
-  _SET_CC(cpu, r, v);
 }
 #endif
 
@@ -964,25 +886,22 @@ int16_t v = E50X(efetch_w)(cpu, op);
 E50I(dh1)
 {
 int dr = op_dr(op);
-int16_t r = G_RH(cpu, dr);
-int ovf, car;
+uint16_t r = G_RH(cpu, dr);
+int eq, lt, car, ovf;
 
   logop1oo(op, "dh1", dr, r);
 
-  int16_t h = sub_w(r, 1, &ovf, &car);
+  uint16_t h = sba_w(r, 1, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_RH(cpu, dr, h);
 
   if(ovf)
-  {
-    SET_CC(cpu, r);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, h);
 }
 #endif
 
@@ -991,25 +910,22 @@ int ovf, car;
 E50I(dh2)
 {
 int dr = op_dr(op);
-int16_t r = G_RH(cpu, dr);
-int ovf, car;
+uint16_t r = G_RH(cpu, dr);
+int eq, lt, car, ovf;
 
   logop1oo(op, "dh2", dr, r);
 
-  int16_t h = sub_w(r, 2, &ovf, &car);
+  uint16_t h = sba_w(r, 2, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_RH(cpu, dr, h);
 
   if(ovf)
-  {
-    SET_CC(cpu, r);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, h);
 }
 #endif
 
@@ -1019,24 +935,21 @@ E50I(dr1)
 {
 int dr = op_dr(op);
 int32_t r = G_R(cpu, dr);
-int ovf, car;
+int eq, lt, car, ovf;
 
   logop1oo(op, "dr1", dr, r);
 
-  int32_t h = sub_d(r, 1, &ovf, &car);
+  int32_t h = sba_d(r, 1, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_R(cpu, dr, h);
 
   if(ovf)
-  {
-    SET_CC(cpu, r);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, h);
 }
 #endif
 
@@ -1045,25 +958,22 @@ int ovf, car;
 E50I(dr2)
 {
 int dr = op_dr(op);
-int32_t r = G_R(cpu, dr);
-int ovf, car;
+uint32_t r = G_R(cpu, dr);
+int eq, lt, car, ovf;
 
   logop1oo(op, "dr2", dr, r);
 
-  int32_t h = sub_d(r, 2, &ovf, &car);
+  uint32_t h = sba_d(r, 2, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_R(cpu, dr, h);
 
   if(ovf)
-  {
-    SET_CC(cpu, r);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, h);
 }
 #endif
 
@@ -1072,13 +982,16 @@ int ovf, car;
 E50I(dm)
 {
 volatile int32_t r = E50X(efetch_d)(cpu, op); // GCC compiler bug, fix with volatile
+int eq, lt;
 
   logop1o(op, "dm", r);
 
-  E50X(estore_dx)(cpu, op, --r, 0);
+  r = sba_d(r, 1, &eq, &lt, NULL, NULL);
 
-//SET_CC(cpu, r);
-  SET_CC(cpu, (uint32_t)r == 0x7fffffff ? -1 : r);
+  E50X(estore_dx)(cpu, op, r, 0);
+
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
 }
 #endif
 
@@ -1087,13 +1000,16 @@ volatile int32_t r = E50X(efetch_d)(cpu, op); // GCC compiler bug, fix with vola
 E50I(dmh)
 {
 int16_t r = E50X(efetch_w)(cpu, op);
+int eq, lt;
 
   logop1o(op, "dmh", r & 0xffff);
 
-  E50X(estore_wx)(cpu, op, --r, 0);
+  r = sba_w(r, 1, &eq, &lt, NULL, NULL);
 
-//SET_CC(cpu, r);
-  SET_CC(cpu, (uint16_t)r == 0x7fff ? -1 : r);
+  E50X(estore_wx)(cpu, op, r, 0);
+
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
 }
 #endif
 
@@ -1102,25 +1018,22 @@ int16_t r = E50X(efetch_w)(cpu, op);
 E50I(ih1)
 {
 int dr = op_dr(op);
-int16_t r = G_RH(cpu, dr);
-int ovf, car;
+uint16_t r = G_RH(cpu, dr);
+int eq, lt, car, ovf;
 
   logop1oo(op, "ih1", dr ,r);
 
-  int16_t h = add_w(r, 1, &ovf, &car);
+  uint16_t h = add_w(r, 1, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_RH(cpu, dr, h);
 
   if(ovf)
-  {
-    SET_CC(cpu, r);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, h);
 }
 #endif
 
@@ -1129,25 +1042,22 @@ int ovf, car;
 E50I(ih2)
 {
 int dr = op_dr(op);
-int16_t r = G_RH(cpu, dr);
-int ovf, car;
+uint16_t r = G_RH(cpu, dr);
+int eq, lt, car, ovf;
 
   logop1oo(op, "ih2", dr, r);
 
-  int16_t h = add_w(r, 2, &ovf, &car);
+  uint16_t h = add_w(r, 2, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_RH(cpu, dr, h);
 
   if(ovf)
-  {
-    SET_CC(cpu, r);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, h);
 }
 #endif
 
@@ -1156,25 +1066,22 @@ int ovf, car;
 E50I(ir1)
 {
 int dr = op_dr(op);
-int32_t r = G_R(cpu, dr);
-int ovf, car;
+uint32_t r = G_R(cpu, dr);
+int eq, lt, car, ovf;
 
   logop1oo(op, "ir1", dr, r);
 
-  int32_t d = add_d(r, 1, &ovf, &car);
+  uint32_t d = add_d(r, 1, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_R(cpu, dr, d);
 
   if(ovf)
-  {
-    SET_CC(cpu, r);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, d);
 }
 #endif
 
@@ -1183,25 +1090,22 @@ int ovf, car;
 E50I(ir2)
 {
 int dr = op_dr(op);
-int32_t r = G_R(cpu, dr);
-int ovf, car;
+uint32_t r = G_R(cpu, dr);
+int eq, lt, car, ovf;
 
   logop1oo(op, "ir2", dr, r);
 
-  int32_t d = add_d(r, 2, &ovf, &car);
+  uint32_t d = add_d(r, 2, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_R(cpu, dr, d);
 
   if(ovf)
-  {
-    SET_CC(cpu, r);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, d);
 }
 #endif
 
@@ -1210,13 +1114,16 @@ int ovf, car;
 E50I(im)
 {
 volatile int32_t r = E50X(efetch_d)(cpu, op); // GCC compiler bug, fix with volatile
+int eq, lt;
 
   logop1o(op, "im", r);
 
-  E50X(estore_dx)(cpu, op, ++r, 0);
+  r = add_d(r, 1, &eq, &lt, NULL, NULL);
 
-//SET_CC(cpu, r);
-  SET_CC(cpu, (uint32_t)r == 0x80000000 ? 1 : r);
+  E50X(estore_dx)(cpu, op, r, 0);
+
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
 }
 #endif
 
@@ -1225,13 +1132,16 @@ volatile int32_t r = E50X(efetch_d)(cpu, op); // GCC compiler bug, fix with vola
 E50I(imh)
 {
 int16_t r = E50X(efetch_w)(cpu, op);
+int eq, lt;
 
   logop1o(op, "imh", r & 0xffff);
 
-  E50X(estore_wx)(cpu, op, ++r, 0);
+  r = add_w(r, 1, &eq, &lt, NULL, NULL);
 
-//SET_CC(cpu, r);
-  SET_CC(cpu, (uint16_t)r == 0x8000 ? 1 : r);
+  E50X(estore_wx)(cpu, op, r, 0);
+
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
 }
 #endif
 
@@ -1353,26 +1263,23 @@ uint32_t r = G_R(cpu, dr);
 E50I(s)
 {
 int dr = op_dr(op);
-int32_t r = G_R(cpu, dr);
-int32_t v = E50X(efetch_d)(cpu, op);
-int ovf, car;
+uint32_t r = G_R(cpu, dr);
+uint32_t v = E50X(efetch_d)(cpu, op);
+int eq, lt, car, ovf;
 
   logop2o3(op, "s", dr, r, v);
 
-  int32_t d = sub_d(r, v, &ovf, &car);
+  uint32_t d = sba_d(r, v, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
  
   S_R(cpu, dr, d);
 
   if(ovf)
-  {
-    SET_CC(cpu, r);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, d);
 }
 #endif
 
@@ -1381,26 +1288,23 @@ int ovf, car;
 E50I(sh)
 {
 int dr = op_dr(op);
-int16_t r = G_RH(cpu, dr);
-int16_t v = E50X(efetch_w)(cpu, op);
-int ovf, car;
+uint16_t r = G_RH(cpu, dr);
+uint16_t v = E50X(efetch_w)(cpu, op);
+int eq, lt, car, ovf;
 
   logop2o3(op, "sh", dr, r, v);
 
-  int16_t h = sub_w(r, v, &ovf, &car);
+  uint16_t h = sba_w(r, v, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
  
   S_RH(cpu, dr, h);
 
   if(ovf)
-  {
-    SET_CC(cpu, r);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, h);
 }
 #endif
 
@@ -1409,25 +1313,22 @@ int ovf, car;
 E50I(tc)
 {
 int dr = op_dr(op);
-int32_t r = G_R(cpu, dr);
-int ovf, car;
+uint32_t r = G_R(cpu, dr);
+int eq, lt, car, ovf;
 
   logop1oo(op, "tc", dr, r);
 
-  r = sub_d(0, r, &ovf, &car);
+  r = sba_d(0, r, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_R(cpu, dr, r);
 
   if(ovf)
-  {
-    SET_CC(cpu, 1);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, r);
 }
 #endif
 
@@ -1436,25 +1337,22 @@ int ovf, car;
 E50I(tch)
 {
 int dr = op_dr(op);
-int16_t r = G_RH(cpu, dr);
-int ovf, car;
+uint16_t r = G_RH(cpu, dr);
+int eq, lt, car, ovf;
 
   logop1oo(op, "tch", dr, r);
 
-  r = sub_w(0, r, &ovf, &car);
+  r = sba_w(0, r, &eq, &lt, &car, &ovf);
 
-  cpu->crs->km.cbit = ovf;
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
   cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
 
   S_RH(cpu, dr, r);
 
   if(ovf)
-  {
-    SET_CC(cpu, 1);
     E50X(int_ovf)(cpu);
-  }
-  else
-    SET_CC(cpu, r);
 }
 #endif
 
@@ -1466,7 +1364,10 @@ int32_t r = E50X(efetch_d)(cpu, op);
 
   logop1o(op, "tm", r);
 
-  SET_CC(cpu, r);
+  int eq, lt;
+  sba_d(r, 0, &eq, &lt, NULL, NULL);
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
 }
 #endif
 
@@ -1478,7 +1379,10 @@ int16_t r = E50X(efetch_w)(cpu, op);
 
   logop1o(op, "tmh", r & 0xffff);
 
-  SET_CC(cpu, r);
+  int eq, lt;
+  sba_w(r, 0, &eq, &lt, NULL, NULL);
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
 }
 #endif
 

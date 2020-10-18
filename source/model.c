@@ -38,7 +38,7 @@ static struct cpumodel_t modeltab[] = {
 //     |       +------------------------------------------- Model Number
 //     |       |    +-------------------------------------- HMAP or PMT for the 2755, 6350, and 9750 to 9955 II, and above
 //     |       |    |   +---------------------------------- Number of register files
-//     |       |    |   |    +----------------------------- Consealed stack in high segment (P6350 only)
+//     |       |    |   |    +----------------------------- Consealed stack in high segment
 //     |       |    |   |    |        +-------------------- EA formation model for non-indexing instructions
 //     |       |    |   |    |        |       +------------ Second instruction stream
 //     |       |    |   |    |        |       |     +------ Microcode manufactering level
@@ -65,36 +65,36 @@ static struct cpumodel_t modeltab[] = {
   { "750Y",   12, hmap, 2, cslow,  current, single, 0, 0 },
   { "550Y",   13, hmap, 2, cslow,  current, single, 0, 0 },
   { "850Y",   14, hmap, 2, cslow,  current, multi,  0, 0 },
-//{ "9950",   15, pmt,  4, cslow,  current, single, 0, 0 },
-  { "9650",   16, hmap, 8, cslow,  current, single, 0, 0 },
-  { "2550",   17, hmap, 8, cslow,  current, single, 0, 0 },
-  { "9955",   18, pmt,  4, cslow,  current, single, 0, 0 },
-  { "9750",   19, pmt,  4, cslow,  current, single, 0, 0 },
-  { "2150",   20, hmap, 2, cslow,  current, single, 0, 0 },
-  { "2350",   21, hmap, 8, cslow,  current, single, 0, 0 },
-  { "2655",   22, hmap, 8, cslow,  current, single, 0, 0 },
-  { "9655",   23, hmap, 8, cslow,  current, single, 0, 0 },
-  { "9955T",  24, pmt,  2, cslow,  current, single, 0, 0 },
-  { "2450",   25, hmap, 8, cslow,  current, single, 0, 0 },
-  { "4050",   26, pmt,  4, cslow,  current, single, 0, 0 },
-  { "4150",   27, pmt,  4, cslow,  current, single, 0, 0 },
-  { "6350",   28, pmt,  4, cshigh, current, single, 0, 0 },
-  { "6550",   29, pmt,  4, cslow,  current, multi,  0, 0 },
-  { "9955II", 30, pmt,  4, cslow,  current, single, 0, 0 },
-  { "2755",   31, pmt,  8, cslow,  current, single, 0, 0 },
-  { "2455",   32, pmt,  8, cslow,  current, single, 0, 0 },
-  { "5310",   33, pmt,  4, cslow,  current, single, 0, 0 },
-  { "9755",   34, pmt,  4, cslow,  current, single, 0, 0 },
-  { "2850",   35, pmt,  4, cslow,  current, multi,  0, 0 },
-  { "2950",   36, pmt,  4, cslow,  current, single, 0, 0 },
-  { "5330",   37, pmt,  4, cslow,  current, single, 0, 0 },
-  { "4450",   38, pmt,  4, cslow,  current, single, 0, 0 },
-  { "5370",   39, pmt,  4, cslow,  current, multi,  0, 0 },
-  { "6650",   40, pmt,  4, cslow,  current, multi,  0, 0 },
-  { "6450",   41, pmt,  4, cslow,  current, single, 0, 0 },
-  { "6150",   42, pmt,  4, cslow,  current, single, 0, 0 },
-  { "5320",   43, pmt,  4, cslow,  current, single, 0, 0 },
-  { "5340",   44, pmt,  4, cslow,  current, single, 0, 0 },
+//{ "9950",   15, pmt,  4, cslow,  current, single, 0, 0 }, // 16M
+  { "9650",   16, hmap, 8, cslow,  current, single, 0, 0 }, // 8M
+  { "2550",   17, hmap, 8, cslow,  current, single, 0, 0 }, // 8M
+  { "9955",   18, pmt,  4, cslow,  current, single, 0, 0 }, // 16M
+  { "9750",   19, pmt,  4, cslow,  current, single, 0, 0 }, // 16M
+  { "2150",   20, hmap, 2, cslow,  current, single, 0, 0 }, // 8M
+  { "2350",   21, hmap, 8, cslow,  current, single, 0, 0 }, // 8M
+  { "2655",   22, hmap, 8, cslow,  current, single, 0, 0 }, // 8M
+  { "9655",   23, hmap, 8, cslow,  current, single, 0, 0 }, // 8M
+  { "9955T",  24, pmt,  2, cslow,  current, single, 0, 0 }, // 32M
+  { "2450",   25, hmap, 8, cslow,  current, single, 0, 0 }, // 8M
+  { "4050",   26, pmt,  4, cshigh, current, single, 0, 0 }, // 64M
+  { "4150",   27, pmt,  4, cshigh, current, single, 0, 0 }, // 64M
+  { "6350",   28, pmt,  4, cshigh, current, single, 0, 0 }, // 128M
+  { "6550",   29, pmt,  4, cshigh, current, multi,  0, 0 }, // 128M
+  { "9955II", 30, pmt,  4, cslow,  current, single, 0, 0 }, // 32M
+  { "2755",   31, pmt,  8, cslow,  current, single, 0, 0 }, // 16M
+  { "2455",   32, pmt,  8, cslow,  current, single, 0, 0 }, // 16M
+  { "5310",   33, pmtx, 4, cshigh, current, single, 0, 0 }, // 512M
+  { "9755",   34, pmt,  4, cslow,  current, single, 0, 0 }, // 16M
+  { "2850",   35, pmt,  4, cshigh, current, multi,  0, 0 }, // 64M
+  { "2950",   36, pmt,  4, cshigh, current, single, 0, 0 }, // 64M
+  { "5330",   37, pmtx, 4, cshigh, current, single, 0, 0 }, // 512M
+  { "4450",   38, pmt,  4, cslow,  current, single, 0, 0 }, // 32M
+  { "5370",   39, pmt,  4, cshigh, current, multi,  0, 0 }, // 512M
+  { "6650",   40, pmt,  4, cshigh, current, multi,  0, 0 }, // 128M
+  { "6450",   41, pmt,  4, cshigh, current, single, 0, 0 }, // 128M
+  { "6150",   42, pmt,  4, cshigh, current, single, 0, 0 }, // 64M
+  { "5320",   43, pmtx, 4, cshigh, current, single, 0, 0 }, // 512M
+  { "5340",   44, pmtx, 4, cshigh, current, single, 0, 0 }, // 512M
 };
 static const int nmodels = sizeof(modeltab)/sizeof(*modeltab);
 

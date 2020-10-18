@@ -35,12 +35,22 @@ void io_reset(cpu_t *);
 int  io_assign(cpu_t *, int, int, int, char *[]);
 int  io_load(cpu_t *, int, int);
 
+#define IO_DMX_DMC 0x0800
+#define IO_DMA_MSK 0x001F
+#define IO_DMC_MSK 0x07FF
+#define IO_DMI_MSK 0xF000
+#define IO_DMI_SFT 12
+
+#define IO_IS_DMA(_c) (!((_c) & IO_DMX_DMC))
+#define IO_DMA_CH(_c) ((_c) & IO_DMA_MSK)
+#define IO_DMC_CH(_c) ((_c) & IO_DMC_MSK)
+#define IO_DMX_CN(_c) (((_c) & IO_DMI_MSK) >> IO_DMI_SFT)
+
 uint16_t ifetch_w(cpu_t *, uint32_t);
 uint32_t ifetch_d(cpu_t *, uint32_t);
 void istore_w(cpu_t *, uint32_t, uint16_t);
 void istore_d(cpu_t *, uint32_t, uint32_t);
-int32_t i2r(cpu_t *, uint32_t);
-
+int32_t c2r(cpu_t *, uint32_t);
 
 typedef struct intr_t {
   volatile int      i;
@@ -50,11 +60,39 @@ typedef struct intr_t {
 static inline void io_intr_init(cpu_t *cpu)
 {
   pthread_mutex_init(&cpu->intr.mutex, NULL);
+#if defined(IDLE_WAIT)
+  pthread_cond_init(&cpu->intr.cond, NULL);
+#endif
   cpu->intr.a = cpu->intr.n = 0;
   for(int n = 0; n < INTR_QSIZE; ++n)
     cpu->intr.v[n] = -1;
   cpu->intr.c = -1;
 }
+
+static inline int io_pending(cpu_t *cpu)
+{
+  return cpu->intr.a != cpu->intr.n;
+}
+
+#if defined(IDLE_WAIT)
+static inline int io_idle_wait(cpu_t *cpu, int val)
+{
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  ts.tv_nsec += val * IDLE_WAIT;
+  ts.tv_sec  += ts.tv_nsec / 1000000000ULL;
+  ts.tv_nsec %= 1000000000ULL;
+  pthread_mutex_lock(&cpu->intr.mutex);
+  int rc = io_pending(cpu) ? 0 : pthread_cond_timedwait(&cpu->intr.cond, &cpu->intr.mutex, &ts);
+  pthread_mutex_unlock(&cpu->intr.mutex);
+  return rc != ETIMEDOUT;
+}
+
+static inline void io_idle_post(cpu_t *cpu)
+{
+  pthread_cond_broadcast(&cpu->intr.cond);
+}
+#endif
 
 static inline uint16_t io_devslot(uint16_t devid, uint16_t slot)
 {
@@ -79,11 +117,6 @@ static uint16_t slot = num_fixed_slots;
   return io_devslot(devid, slot++);
 }
 
-static inline int io_pending(cpu_t *cpu)
-{
-  return cpu->intr.a != cpu->intr.n;
-}
-
 static inline int io_incrnxt(int i)
 {
   return (i + 1) & INTR_QMASK;
@@ -99,31 +132,21 @@ static inline int io_tstint(cpu_t *cpu, intr_t *intr)
   return intr->i >= 0 && intr->v == cpu->intr.v[intr->i];
 }
 
-static inline void io_setv(intr_t *intr, uint16_t v)
+static inline void io_setintv(cpu_t *cpu, intr_t *intr, uint16_t v)
 {
-  intr->v = v;
-}
-
-static inline void io_setint(cpu_t *cpu, intr_t *intr)
-{
-//cpu_post(cpu);
-
   if(io_tstint(cpu, intr))
     return;
 
   pthread_mutex_lock(&cpu->intr.mutex);
   int n = io_incrint(&cpu->intr.n);
-  cpu->intr.v[n] = intr->v;
-  pthread_mutex_unlock(&cpu->intr.mutex);
+  cpu->intr.v[n] = v;
   intr->i = n;
+  intr->v = v;
+#if defined(IDLE_WAIT)
+  io_idle_post(cpu);
+#endif
+  pthread_mutex_unlock(&cpu->intr.mutex);
 logall("\nsetint v %4.4x i %d (%d)\n", intr->v, n, intr->i);
-}
-
-static inline void io_setintv(cpu_t *cpu, intr_t *intr, uint16_t v)
-{
-  io_setv(intr, v);
-
-  io_setint(cpu, intr);
 }
 
 static inline int32_t io_intvec(cpu_t *cpu)
@@ -191,33 +214,31 @@ static inline void io_mem_copy(cpu_t *cpu, uint32_t addr, uint8_t *buffer, ssize
 }
 
 
-static inline size_t io_dma_copy(cpu_t *cpu, int ca, int cn, uint8_t *buffer, ssize_t len, int wr)
+static inline size_t io_dma_copy(cpu_t *cpu, int ca, int cn, uint8_t *buffer, ssize_t len, int wr, uint16_t *cr)
 {
 size_t bytes = 0;
 
-  for(int n = ca; n <= ca + (cn<<1) && n < 040; n += 2) // FIXME TODO
+  for(int n = ca; n <= ca + (cn<<1) && IO_DMA_CH(n) < 040; n += 2) // FIXME TODO
   {
-  int dma_channel = n & 037;
+  int dma_channel = IO_DMA_CH(n);
   ssize_t xfer = G_DMA_L(cpu, dma_channel) << 1;
-  uint32_t addr = G_DMA_A(cpu, dma_channel);
-
-    if(!addr)
-      break;
 
     if(len < xfer)
       xfer = len;
 
     if(xfer && len)
     {
-      logmsg("dma: copying %zd bytes %s %4.4x\n", xfer, wr ? "from" : "to", addr);
+      logmsg("dma: copying %zd bytes %s %4.4x\n", xfer, wr ? "from" : "to", G_DMA_A(cpu, dma_channel));
       io_mem_copy(cpu, G_DMA_A(cpu, dma_channel), buffer, xfer, wr);
       buffer += xfer;
       bytes += xfer;
       len -= xfer;
-      logmsg("dma: copy sta addr %4.4x xfer %4.4x\n", G_DMA_A(cpu, dma_channel), G_DMA_L(cpu, dma_channel));
+      logmsg("dma: copy cha %4.4x sta addr %4.4x xfer %4.4x\n", dma_channel, G_DMA_A(cpu, dma_channel), G_DMA_L(cpu, dma_channel));
       S_DMA_A(cpu, dma_channel, G_DMA_A(cpu, dma_channel) + (xfer >> 1));
       S_DMA_L(cpu, dma_channel, G_DMA_L(cpu, dma_channel) - (xfer >> 1));
-      logmsg("dma: copy end addr %4.4x xfer %4.4x\n", G_DMA_A(cpu, dma_channel), G_DMA_L(cpu, dma_channel));
+      logmsg("dma: copy cha %4.4x sta addr %4.4x xfer %4.4x\n", dma_channel, G_DMA_A(cpu, dma_channel), G_DMA_L(cpu, dma_channel));
+      if(cr)
+        *cr = n;
     }
   }
 
@@ -226,12 +247,13 @@ size_t bytes = 0;
 }
 
 
-static inline size_t io_dmc_copy(cpu_t *cpu, uint16_t channel, uint8_t *buffer, size_t len, int wr)
+static inline size_t io_dmc_copy(cpu_t *cpu, uint16_t channel, uint8_t *buffer, size_t len, int wr, uint16_t *cr)
 {
 size_t bytes = 0;
-int dc = channel & 0x7ff /* MT_DC_CHA */;  // TODO FIXME
+int chain = IO_DMX_CN(channel) + 1;
+int dc = IO_DMC_CH(channel);
 
-  while(len > 0)
+  while(chain--)
   {
   uint32_t dmc_sta = ifetch_w(cpu, dc);
   uint32_t dmc_end = ifetch_w(cpu, dc+1);
@@ -239,8 +261,9 @@ int dc = channel & 0x7ff /* MT_DC_CHA */;  // TODO FIXME
   if(!dmc_sta || dmc_end < dmc_sta)
     break;
 
-  size_t dmc_len = (1 + dmc_end - dmc_sta) << 1;
-  size_t xfer = len > dmc_len ? dmc_len : len;
+  size_t xfer = (1 + dmc_end - dmc_sta) << 1;
+  if(!wr)
+    xfer = (len > xfer) ? xfer : len;
 
     logmsg("dmc: sta %4x end %4x len %4zx(%zu)\n", dmc_sta, dmc_end, xfer >> 1, xfer);
 
@@ -253,7 +276,11 @@ int dc = channel & 0x7ff /* MT_DC_CHA */;  // TODO FIXME
       len -= xfer;
       dmc_sta += (xfer >> 1);
       istore_w(cpu, dc, dmc_sta);
+      if(cr)
+        *cr = dc | IO_DMX_DMC;
     }
+    else
+      break;
 
     logmsg("dmc: sta %4x end %4x len %4zx(%zu)\n", dmc_sta, dmc_end, xfer >> 1, xfer);
 
@@ -265,12 +292,9 @@ int dc = channel & 0x7ff /* MT_DC_CHA */;  // TODO FIXME
 }
 
 
-static inline int cpboot(cpu_t *cpu)
+static inline int cpload(cpu_t *cpu, char *fn)
 {
-  if(!(cpu->sys->cpboot && *cpu->sys->cpboot) || isfilex(cpu->sys->cpboot))
-    return 0;
-
-  int fd = open(cpu->sys->cpboot, O_RDONLY);
+  int fd = open(fn, O_RDONLY);
 
   if(fd == -1)
     return 0;
@@ -287,9 +311,9 @@ static inline int cpboot(cpu_t *cpu)
   } __attribute__ ((packed)) cphdr;
 
   read(fd, &cphdr, sizeof(cphdr));
-  uint8_t *cpboot = physad(cpu, from_be_16(cphdr.sa));
+  uint8_t *load = physad(cpu, from_be_16(cphdr.sa));
 
-  read(fd, cpboot, (1+from_be_16(cphdr.ea)-from_be_16(cphdr.sa))<<1);
+  read(fd, load, (1+from_be_16(cphdr.ea)-from_be_16(cphdr.sa))<<1);
 
   close(fd);
 
@@ -297,9 +321,17 @@ static inline int cpboot(cpu_t *cpu)
   S_A(cpu, from_be_16(cphdr.a));
   S_B(cpu, from_be_16(cphdr.b));
   S_X(cpu, from_be_16(cphdr.x));
-  S_KEYS(cpu, from_be_16(cphdr.k));
+//S_KEYS(cpu, from_be_16(cphdr.k));
 
   return 1;
+}
+
+static inline int cpboot(cpu_t *cpu)
+{
+  if(!(cpu->sys->cpboot && *cpu->sys->cpboot) || isfilex(cpu->sys->cpboot))
+    return 0;
+
+  return cpload(cpu, cpu->sys->cpboot);
 }
 
 

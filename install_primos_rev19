@@ -8,6 +8,7 @@ set timeout -1
 
 spawn em50
 expect "CP> ";                         send -- "ASSIGN MT0 03_log.tape_I=boot_II=iptpal.tap\r"
+expect "CP> ";                         send -- "ASSIGN 026:0 * 160MB\r"
 
 expect "CP> ";                         send -- "BOOT 15\r"
 expect "TREENAME=";                    send -- "*DOS64\r"

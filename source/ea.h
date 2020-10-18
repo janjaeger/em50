@@ -40,11 +40,12 @@
 #define op_x(_o) (((_o)[0] >> 6) & 1)
 #define op_s(_o) (((_o)[0] >> 1) & 1)
 #define op_d(_o) ((((_o)[0] & 1) << 8) | (_o)[1])
-#define op_o(_o) ((int16_t)(((_o)[0] & 1) ? ~((_o)[1] ^ 0377) : (_o)[1]))
+#define op_o(_o) (((int16_t)((_o)[0] << 15) >> 7) | (_o)[1])
 #define op_b(_o) ((_o)[1] & 0b11)
 #define op_cb(_o) op_b(_o)
 #define op_n(_o) (((_o)[0] & 0b00111100) == 0b00110100)
 #define op_l(_o) (((_o)[2] << 8) | (_o)[3])
+#define op_nx(_o) (op_n(_o) ? 0 : op_x(_o))
 #define op_I  0b10000000
 #define op_X  0b01000000
 #define op_S  0b00000010
@@ -54,11 +55,11 @@
 #define op_nY(_o) (op_n(_o) ? 0 : op_Y)
 #define op_IXS(_o) ((_o)[0] & (op_I | op_nX(_o) | op_S))
 #define op_IX(_o)  ((_o)[0] & (op_I | op_nX(_o)))
-#define op_IXY(_o) (((_o)[0] & (op_I | op_nX(_o))) | ((_o)[1] & op_nY(_o)))
+#define op_IXY(_o) ((((_o)[0] & (op_I | op_X)) >> 5) | (((_o)[1] & op_Y) >> 4))
 #define ad_I 0x8000
 #define ad_X 0x4000
 #define ad_i(_a) (_a & ad_I)
-#define ad_nx(_o, _a) (op_n(_o) ? 0 : (_a & ad_X))
+#define ad_x(_a) (_a & ad_X)
 
 #define w16(_x) ((_x) & 0xffff)
 #define w15(_x) ((_x) & 0x7fff)
@@ -85,7 +86,6 @@ static char *tab[8] = { "---", "--s", "-x-", "-xs", "i--", "i-s", "ix-", "ixs" }
   return tab[(op_i(op) << 2) | (op_x(op) << 1) | op_s(op)];
 }
 
-
 #define AB(_c, _x, _v) (intraseg_i(G_ ## _x(_c), (_v)))
 #define AX(_c, _x, _v) (intraseg_i(G_ZB(_c, _x), (_v)))
 
@@ -110,15 +110,15 @@ static inline uint16_t E50X(ea)(cpu_t *cpu, op_t op)
 {
 uint16_t dis;
 
-  dis = op_d(op) | (op_IX(op) << 8);  // 0/D
+  dis = op_d(op);  // 0/D
 
   if(op_s(op))
-    dis |= cpu->p & 0x3e00;  // C/D
+    dis |= (cpu->exec ? cpu->ep : cpu->p) & 0x3e00;  // C/D
 
-  if(ad_nx(op, dis))
+  if(op_nx(op))
     dis += G_X(cpu);  // -/D+X
 
-  if(ad_i(dis))
+  if(op_i(op))
     dis = E50X(vfetch_is)(cpu, dis);
 
   return dis & 0x3fff;
@@ -128,7 +128,7 @@ uint16_t dis;
 
 static inline uint16_t E50X(ea)(cpu_t *cpu, op_t op)
 {
-uint16_t dis = op_d(op);;
+uint16_t dis = op_d(op);
 
   switch(op_IXS(op))
   {
@@ -136,7 +136,7 @@ uint16_t dis = op_d(op);;
     break;                   // 0/D
 
   case op_S:
-    dis |= cpu->p & 0x7e00;  // C/D
+    dis |= (cpu->exec ? cpu->ep : cpu->p) & 0x7e00;  // C/D
     break;
 
   case op_X:
@@ -144,7 +144,7 @@ uint16_t dis = op_d(op);;
     break;                   // 0/D+X
 
   case op_X | op_S:
-    dis |= cpu->p & 0x7e00;
+    dis |= (cpu->exec ? cpu->ep : cpu->p) & 0x7e00;
     dis += G_X(cpu);         // C/D+X
     break;
 
@@ -153,21 +153,21 @@ uint16_t dis = op_d(op);;
     break;
 
   case op_I | op_S:
-    dis |= cpu->p & 0x7e00;
+    dis |= (cpu->exec ? cpu->ep : cpu->p) & 0x7e00;
     dis =  E50X(vfetch_is)(cpu, dis); // I(C/D);
     break;
 
   case op_I | op_X:
     if(dis < 0100)
-    {
-      dis += G_X(cpu);
-      dis = E50X(vfetch_is)(cpu, dis); // I(D+X)
-    }
+      dis =  E50X(vfetch_is)(cpu, dis + G_X(cpu)); // I(0/D+X);
     else
-    {
-      dis = E50X(vfetch_is)(cpu, dis);
-      dis += G_X(cpu);              // I(D)+X;
-    }
+      dis =  E50X(vfetch_is)(cpu, dis) + G_X(cpu); // I(0/D)+X;
+    break;
+
+  case op_I | op_X | op_S:
+    dis |= (cpu->exec ? cpu->ep : cpu->p) & 0x7e00;
+    dis = E50X(vfetch_is)(cpu, dis);
+    dis += G_X(cpu);              // I(C/D)+X;
     break;
 
   default:
@@ -219,19 +219,19 @@ uint16_t dis;
     break;
 
   case op_S:
-    dis = cpu->p + op_o(op);  // P+D;
+    dis = (cpu->exec ? cpu->ep : cpu->p) + op_o(op);  // P+D;
     break;
 
   case op_X | op_S:
-    dis = cpu->p + op_o(op) + G_X(cpu); // P+D+X;
+    dis = (cpu->exec ? cpu->ep : cpu->p) + op_o(op) + G_X(cpu); // P+D+X;
     break;
 
   case op_I | op_S:
-    dis = E50X(vfetch_is)(cpu, cpu->p + op_o(op)); // I(P+D);
+    dis = E50X(vfetch_is)(cpu, (cpu->exec ? cpu->ep : cpu->p) + op_o(op)); // I(P+D);
     break;
 
   case op_I | op_X | op_S:
-    dis = E50X(vfetch_is)(cpu, cpu->p + op_o(op)) + G_X(cpu); // I(P+D)+X;
+    dis = E50X(vfetch_is)(cpu, (cpu->exec ? cpu->ep : cpu->p) + op_o(op)) + G_X(cpu); // I(P+D)+X;
     break;
 
   default:
@@ -244,7 +244,7 @@ uint16_t dis;
 
 static inline uint16_t E50X(ix_ea_arg)(cpu_t *cpu, op_t op)
 {
-    cpu->arg = E50X(vfetch_iw)(cpu);
+    cpu->arg = E50X(vfetch_iw_be)(cpu);
     return op_l(op);
 }
 
@@ -252,6 +252,7 @@ static inline uint16_t E50X(ix_ea_long)(cpu_t *cpu, op_t op)
 {
 uint16_t di;
 uint16_t sp;
+uint16_t ea;
 int cb = op_cb(op);
 
   switch(op_IX(op) | cb)
@@ -299,13 +300,15 @@ int cb = op_cb(op);
 
   case op_I | 2: //(F)
     sp = G_SP(cpu);
-    S_SP(cpu, sp + 1);
-    return E50X(vfetch_is)(cpu, sp);  // I(SP) @Postincrement
+    ea = E50X(vfetch_is)(cpu, sp++);  // I(SP) @Postincrement
+    S_SP(cpu, sp);
+    return ea;
 
   case op_X | 2: //(F)
     sp = G_SP(cpu);
-    S_SP(cpu, sp + 1);
-    return E50X(vfetch_is)(cpu, sp) + G_X(cpu);  // I(SP)+X @Postincrement
+    ea = E50X(vfetch_is)(cpu, sp++) + G_X(cpu);  // I(SP)+X @Postincrement
+    S_SP(cpu, sp);
+    return ea;
 
   case op_I | op_X | 2: //(D)
     di = E50X(ix_ea_arg)(cpu, op);
@@ -318,13 +321,15 @@ int cb = op_cb(op);
 
   case op_I | 3: //(G)
     sp = G_SP(cpu);
-    S_SP(cpu, --sp);
-    return E50X(vfetch_is)(cpu, sp);  // I(SP-1) #Predecrement
+    ea = E50X(vfetch_is)(cpu, --sp);  // I(SP-1) #Predecrement
+    S_SP(cpu, sp);
+    return ea;
 
   case op_X | 3: //(G)
     sp = G_SP(cpu);
-    S_SP(cpu, --sp);
-    return E50X(vfetch_is)(cpu, sp) + G_X(cpu);  // I(SP-1)+X #Predecrement
+    ea = E50X(vfetch_is)(cpu, --sp) + G_X(cpu);  // I(SP-1)+X #Predecrement
+    S_SP(cpu, sp);
+    return ea;
 
   case op_I | op_X | 3: //(E)
     di = E50X(ix_ea_arg)(cpu, op);
@@ -342,13 +347,9 @@ static inline uint16_t E50X(ea)(cpu_t *cpu, op_t op)
 uint16_t r;
 
   if(op_is_long(op))
-  {
     r = E50X(ix_ea_long)(cpu, op);
-  }
   else
-  {
     r = E50X(ixs_ea_short)(cpu, op);
-  }
 
   ATON(cpu, WXX(r));
 
@@ -379,12 +380,12 @@ int16_t off;
 
   case op_X:
     dis = op_d(op) + G_X(cpu);
-    if(op_d(op) + G_X(cpu) < atr)
-        return dis; // REG;
+    if(dis < atr)
+      return dis; // REG;
     if(op_d(op) < 0400)
-        return AB(cpu, SB, dis); // SB + D;
+      return AB(cpu, SB, dis); // SB + D + X;
     else
-        return AB(cpu, LB, dis); // LB + D;
+      return AB(cpu, LB, dis); // LB + D + X;
 
   case op_I:
     dis = op_d(op);
@@ -395,31 +396,28 @@ int16_t off;
 
   case op_I | op_X:
     dis = op_d(op);
+    if(dis + G_X(cpu) < atr)
+      return AB(cpu, PB, E50X(vfetch_is)(cpu, dis + G_X(cpu))); // I(REG);
     if(dis < 0100)
-    {
-      if(dis + G_X(cpu) < atr)
-        return AB(cpu, PB, E50X(vfetch_is)(cpu, dis + G_X(cpu))); // I(REG);
-      else
-        return AB(cpu, PB, E50X(vfetch_is)(cpu, AB(cpu, PB, dis + G_X(cpu)))); // I(PB + D + X);
-    }
+      return AB(cpu, PB, E50X(vfetch_is)(cpu, AB(cpu, PB, dis + G_X(cpu)))); // I(PB + D + X);
     else
       return AB(cpu, PB, E50X(vfetch_is)(cpu, AB(cpu, PB, dis)) + G_X(cpu)); // I(PB + D) + X;
 
   case op_S:
     off = op_o(op);
-    return AB(cpu, PB, (cpu->exec ? cpu->exec : cpu->p) + off);  // P + D;
+    return AB(cpu, PB, (cpu->exec ? cpu->ep : cpu->p) + off);  // P + D;
 
   case op_X | op_S:
     off = op_o(op);
-    return AB(cpu, PB, (cpu->exec ? cpu->exec : cpu->p) + off + G_X(cpu)); // P + D + X;
+    return AB(cpu, PB, (cpu->exec ? cpu->ep : cpu->p) + off + G_X(cpu)); // P + D + X;
 
   case op_I | op_S:
     off = op_o(op);
-    return AB(cpu, PB, E50X(vfetch_is)(cpu, AB(cpu, PB, (cpu->exec ? cpu->exec : cpu->p) + off))); // I(P + D);
+    return AB(cpu, PB, E50X(vfetch_is)(cpu, AB(cpu, PB, (cpu->exec ? cpu->ep : cpu->p) + off))); // I(P + D);
 
   case op_I | op_X | op_S:
     off = op_o(op);
-    return AB(cpu, PB, E50X(vfetch_is)(cpu, AB(cpu, PB, (cpu->exec ? cpu->exec : cpu->p) + off)) + G_X(cpu)); // I(P + D) + X;
+    return AB(cpu, PB, E50X(vfetch_is)(cpu, AB(cpu, PB, (cpu->exec ? cpu->ep : cpu->p) + off)) + G_X(cpu)); // I(P + D) + X;
 
   default:
     logmsg("abort1\n");
@@ -449,11 +447,11 @@ static const int nx[3][8] = {
 };
 #endif
 
-  cpu->arg = E50X(vfetch_iw)(cpu);
+  cpu->arg = E50X(vfetch_iw_be)(cpu);
 
   uint16_t di = op_l(op);
 
-  int s = ((op[0] & (op_I | op_X)) >> 5) | ((op[1] & op_Y) >> 4);
+  int s = op_IXY(op);
 
   if(op_n(op))
      s = nx
@@ -465,7 +463,7 @@ static const int nx[3][8] = {
 if(op_b(op) /* && G_ZB(cpu, op_b(op)) */ ) logmsg("\n\n*** BASE(%s) %8.8x ***\n\n", base[op_b(op)], G_ZB(cpu, op_b(op)));
 
 
-  switch(s) // op_IXY(op))
+  switch(s)
   {
   case 0:
     return AX(cpu, op_b(op), di);
@@ -513,7 +511,6 @@ uint32_t r;
     ATON(cpu, r & 0xffff);
   }
 
-//if((r & 0x80000000)) { PRINTF("bug1\n"); logmsg("bug ea %8.8x\n", r); }
   return r | (cpu->pb & ea_r);
 }
 
@@ -523,35 +520,35 @@ static inline uint32_t E50X(x_ea)(cpu_t *cpu, op_t op, int a)
 {
 dw_t r;
 
-  if(a)
-    cpu->arg = E50X(vfetch_iw)(cpu);
-
-  uint16_t d = from_be_16(cpu->arg);
-
   int tm = op_tm(op);
   int br = op_br(op);
   int sr = op_sr(op);
 
 logmsg("\nx_ea tm %d br %d sr %d\n", tm, br, sr);
 
+  if(a)
+    cpu->arg = E50X(vfetch_iw_be)(cpu);
+
+  uint16_t d = from_be_16(cpu->arg);
+
   switch(tm) {
     case 3: // Indirect
       if(sr == 0)
-        r.w = E50X(vfetch_il)(cpu, AX(cpu, br, d));
+        r.d = E50X(vfetch_il)(cpu, AX(cpu, br, d));
       else  // Indirect postindexed
-        r.w = intraseg_i(E50X(vfetch_il)(cpu, AX(cpu, br, d)), G_RH(cpu, sr));
+        r.d = intraseg_i(E50X(vfetch_il)(cpu, AX(cpu, br, d)), G_RH(cpu, sr));
       break;
     case 2: // Indirect
       if(sr == 0)
-        r.w = E50X(vfetch_il)(cpu, AX(cpu, br, d));
+        r.d = E50X(vfetch_il)(cpu, AX(cpu, br, d));
       else  // Indirect preindexed
-        r.w = E50X(vfetch_il)(cpu, AX(cpu, br, d + G_RH(cpu, sr)));
+        r.d = E50X(vfetch_il)(cpu, AX(cpu, br, d + G_RH(cpu, sr)));
       break;
     case 1: // Direct
       if(sr == 0)
-        r.w = AX(cpu, br, d);
+        r.d = AX(cpu, br, d);
       else  // Indexed
-        r.w = AX(cpu, br, d + G_RH(cpu, sr));
+        r.d = AX(cpu, br, d + G_RH(cpu, sr));
       break;
     case 0:
       switch(br) {
@@ -571,18 +568,18 @@ logmsg("\nx_ea tm %d br %d sr %d\n", tm, br, sr);
               break;
             case 1: // Floating register source (FR0)
 logall("ea todo 1: tm %d br %d, sr %d\n", tm, br, sr);
-              r.w = G_FAC(cpu, 0);
+              r.d = G_FAC(cpu, 0);
               break;
             case 3: // Floating register source (FR1)
 logall("ea todo 2: tm %d br %d, sr %d\n", tm, br, sr);
-              r.w = G_FAC(cpu, 1);
+              r.d = G_FAC(cpu, 1);
               break;
             default:
               E50X(uii_fault)(cpu, 0);
           }
           break;
         case 3: // General register relative
-          r.h = G_RH(cpu, sr) & 0x1fff;
+          r.h = G_RH(cpu, sr);
           r.l = G_RL(cpu, sr) + d;
           break;
         default:
@@ -593,7 +590,7 @@ logall("ea todo 2: tm %d br %d, sr %d\n", tm, br, sr);
       E50X(uii_fault)(cpu, 0);
   }
 
-  return r.w;
+  return r.d | (cpu->pb & ea_r);
 }
 
 static inline uint32_t E50X(ea)(cpu_t *cpu, op_t op)
@@ -620,7 +617,7 @@ if(sr) logmsg("srh %x sr %x\n", G_RH(cpu, sr), G_R(cpu, sr));
 
   if(br == 1)
   {
-    cpu->arg = E50X(vfetch_iw)(cpu);
+    cpu->arg = E50X(vfetch_iw_be)(cpu);
     return from_be_16(cpu->arg);
   }
 
@@ -657,7 +654,7 @@ if(sr) logmsg("srh %x sr %x\n", G_RH(cpu, sr), G_R(cpu, sr));
 
   if(br == 1)
   {
-    cpu->arg = E50X(vfetch_iw)(cpu);
+    cpu->arg = E50X(vfetch_iw_be)(cpu);
     if(sr == 0)
       return from_be_16(cpu->arg) << 16;
     else
@@ -673,7 +670,7 @@ logall("todo d32\n");
   switch(sr) {
     case 0:
     {
-    uint16_t r = from_be_16(E50X(vfetch_iw)(cpu));
+    uint16_t r = E50X(vfetch_iw)(cpu);
       return ((uint32_t)(r & 0xff00) << 16) | (r & 0x00ff);
     }
     case 1:
@@ -708,7 +705,7 @@ if(sr) logmsg("srh %x sr %x\n", G_RH(cpu, sr), G_R(cpu, sr));
 
   if(br == 1)
   {
-    cpu->arg = E50X(vfetch_iw)(cpu);
+    cpu->arg = E50X(vfetch_iw_be)(cpu);
     if(sr == 0)
       return from_be_16(cpu->arg) << 16;
     else
@@ -724,7 +721,7 @@ logall("todo d64\n");
   switch(sr) {
     case 0:
     {
-    uint16_t r = from_be_16(E50X(vfetch_iw)(cpu));
+    uint16_t r = E50X(vfetch_iw)(cpu);
       return ((uint64_t)(r & 0xff00) << 48) | (r & 0x00ff);
       return r;
     }
@@ -775,7 +772,7 @@ logmsg("grr\n");
   }
 //if(br == 1)
 //{
-//  cpu->arg = E50X(vfetch_iw)(cpu);
+//  cpu->arg = E50X(vfetch_iw_be)(cpu);
 //  return from_be_16(cpu->arg);
 //}
 
@@ -863,13 +860,13 @@ static inline void E50X(estore_w)(cpu_t *cpu, op_t op, uint16_t val)
 }
 
 
-static inline void E50X(estore_d)(cpu_t *cpu, op_t op, uint16_t val)
+static inline void E50X(estore_d)(cpu_t *cpu, op_t op, uint32_t val)
 {
   E50X(estore_dx)(cpu, op, val, 1);
 }
 
 
-static inline void E50X(estore_q)(cpu_t *cpu, op_t op, uint16_t val)
+static inline void E50X(estore_q)(cpu_t *cpu, op_t op, uint64_t val)
 {
   E50X(estore_qx)(cpu, op, val, 1);
 }

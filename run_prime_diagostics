@@ -1,0 +1,131 @@
+#!/usr/bin/expect -f
+#
+# This test runs for a long time, and produces a lot out output, 
+# primarliry caused by:
+#   timeing differeces in cache and memory access
+#   different rounding in floating point instructions
+#   some limitations in the decimal instructions with extremely large numbers
+#
+system curl -O http://www.bitsavers.org/bits/Prime/pps/12_sam_pam_16.6.tap.gz
+system gunzip -f 12_sam_pam_16.6.tap.gz
+set timeout -1
+spawn em50 -c /dev/null -s 2m -l none -o none
+expect "CP> ";  send -- "sh -c 'rm -f .em50/dk0263 .em50/mt0143'\r"
+expect "CP> ";  send -- "assign 026:3 * 160mb\r"
+expect "CP> ";  send -- "sh -c 'touch .em50/mt0143'\r"
+expect "CP> ";  send -- "assign mt0 12_sam_pam_16.6.tap\r"
+expect "CP> ";  send -- "boot 10005\r"
+expect "NAME="; send -- "diag>sam.save\r"
+expect "SAM> "; send -- "set dcm; reset qvfy; reset soe; term tty 0 9600; conf; load; run\r"
+# CPU.JMP&SKIP.SAVE
+# CPU.CLR&MOV.SAVE
+# CPU.LOGIC.SAVE
+# CPU.KEYS.SAVE
+# CPU.REGISTER.SAVE
+# CPU.AMTEST.SAVE
+# CPU.INTEGER.SAVE
+# CPU.SHIFT.SAVE
+# CPU.FAULT.SAVE
+# CPU.SENSE.SAVE
+# CPU.BRANCH.V.SAVE
+# CPU.AMTEST.I.SAVE
+# CPU.JUMP.VI.SAVE
+# CPU.CLR&MOV.I.SAVE
+# CPU.LOGIC.I.SAVE
+# CPU.BRANCH.I.SAVE
+# CPU.INTEGER.I.SAVE
+# CPU.SHIFT.I.SAVE
+# CPU.MCNTL.SAVE
+# CPU.TIMER.SAVE
+# CPU.BRANCH.CACHE.CONTROL.SAVE
+# CPU.CACHE.SAVE
+# CPU.BRANCH.CACHE.SAVE
+# CPU.QUEUE.SAVE
+# CPU.PCL.SAVE
+# CPU.PXT1.SAVE
+# CPU.PXT3.SAVE
+# CPU.AMGRR.SAVE
+# CPU.C.POINTER.SAVE
+# CPU.MP.SAVE
+# CPU.CHAR.V.SAVE
+# CPU.CHAR.I.SAVE
+# CPU.FLOAT.D.SEG
+# CPU.FLOAT.S.SEG
+# CPU.FLOAT.Q.SEG
+# CPU.DECI.V.SEG
+# CPU.DECI.I.SEG
+# MEM.TEST8.SAVE
+# MEM.VM.MON.SAVE
+# IO.AMLC
+expect "DEFAULT CONFIGURATION";             expect "]:  "; send -- "\r"
+# IO.IOBC
+expect "Default Diagnostic Configuration";  expect "]: ";  send -- "\r"
+# IO.ICS2
+                                            expect "]:  "; send -- "\r"
+# IO.ICS3
+                                            expect "]:  "; send -- "\r"
+# IO.PNC
+                                            expect "]:  "; send -- "\r"
+# IO.LHC
+                                            expect "]:  "; send -- "\r"
+# IO.URC
+                                            expect "]?  "; send -- "Q\r"
+# IO.DISK.BASIC
+                                            expect "]? ";  send -- "\r"
+                                            expect "]? ";  send -- "\r"
+                                            expect ")? ";  send -- "3\r"
+                                            expect "]? ";  send -- "Y\r"
+# IO.DISK
+                                            expect "]? ";  send -- "\r"
+                                            expect "]? ";  send -- "\r"
+                                            expect ")? ";  send -- "3\r"
+                                            expect "]? ";  send -- "\r"
+                                            expect "]: ";  send -- "160\r"
+                                            expect "]? ";  send -- "N\r"
+                                            expect "]? ";  send -- "\r"
+                                            expect "]? ";  send -- "\r"
+                                            expect "]? ";  send -- "\r"
+# IO.DISK.10406
+                                            expect "]? ";  send -- "Q\r"
+# IO.DISK.ICOP
+                                            expect "]? ";  send -- "Q\r"
+# IO.DISK.FLAWMAP
+                                            expect "]? ";  send -- "Q\r"
+# IO.TAPE
+                                            expect "]? ";  send -- "N\r"
+                                            expect ")?";   send -- "3\r"
+                                            expect "]? ";  send -- "\r"
+                                            expect "]? ";  send -- "Y\r"
+                                            expect "]? ";  send -- "\r"
+                                            expect "]? ";  send -- "\r"
+# IO.TAPE.BOOT
+                                            expect "]? ";  send -- "Q\r"
+# IO.TAPE.GCR
+                                            expect "]? ";  send -- "Q\r"
+# IO.TAPE.CART
+                                            expect "]? ";  send -- "Q\r"
+# IO.TAPE.MSTC
+                                            expect "]? ";  send -- "Q\r"
+# IO.BUS.TESTER
+                                            expect "]? ";  send -- "Q\r"
+# IO.DMX
+#                                            expect "]?  "; send -- "26\r"
+#                                            expect ")? ";  send -- "3\r"
+#                                            expect "]? ";  send -- "Y\r"
+#                                            expect "]? ";  send -- "160\r"
+#                                            expect "]? ";  send -- "\r"
+#                                            expect "]? ";  send -- "\r"
+
+                                            expect "]?  "; send -- "14\r"
+                                            expect ")? ";  send -- "3\r"
+                                            expect "]? ";  send -- "\r"
+                                            expect "]? ";  send -- "\r"
+                                            expect "]? ";  send -- "\r"
+# IO.ICSMON
+                                            expect "]? ";  send -- "Q\r"
+# MEM.TOOLBOX
+                                            expect "CPU? ";  send -- "Q\r"
+
+expect "SAM> "; send -- "\033\033"
+expect "CP> ";  send -- "quit\r"
+expect eof

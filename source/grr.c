@@ -208,6 +208,7 @@ E50I(tcnp)
   uint32_t r = E50X(efetch_d)(cpu, op);
 
   cpu->crs->km.eq = (r & 0x1fffffff) == 0 ? 1 : 0;
+  cpu->crs->km.lt = 0;
 }
 
 E50I(tcnpr)
@@ -219,6 +220,7 @@ int dr = op_dr(op);
   uint32_t r = G_R(cpu, dr);
 
   cpu->crs->km.eq = (r & 0x1fffffff) == 0 ? 1 : 0;
+  cpu->crs->km.lt = 0;
 }
 
 #endif

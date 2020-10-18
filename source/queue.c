@@ -106,6 +106,7 @@ uint16_t t4 = E50X(vfetch_w)(cpu, ap + 3); // MASK
     E50X(vstore_w)(cpu, ap + 1, t5);
     cpu->crs->km.eq = 0;
   }
+  cpu->crs->km.lt = 0;
 }
 #endif
 
@@ -144,6 +145,7 @@ uint16_t t4 = E50X(vfetch_w)(cpu, ap + 3); // MASK
     E50X(vstore_w)(cpu, ap + 0, t1);
     cpu->crs->km.eq = 0;
   }
+  cpu->crs->km.lt = 0;
 }
 #endif
 
@@ -182,6 +184,7 @@ uint16_t t4 = E50X(vfetch_w)(cpu, ap + 3); // MASK
     E50X(vstore_w)(cpu, ap + 1, t2);
     cpu->crs->km.eq = 0;
   }
+  cpu->crs->km.lt = 0;
 
   logmsg("-> rbq -> %4.4x\n", t2);
 }
@@ -222,6 +225,7 @@ uint16_t t4 = E50X(vfetch_w)(cpu, ap + 3); // MASK
     E50X(vstore_w)(cpu, ap, t1);
     cpu->crs->km.eq = 0;
   }
+  cpu->crs->km.lt = 0;
 
   logmsg("-> rtq -> %4.4x\n", t1);
 }
@@ -251,6 +255,7 @@ uint16_t t3 = E50X(vfetch_w)(cpu, ap + 2); // V SEGMENT
 #endif
 
   cpu->crs->km.eq = (t1 == t2) ? 1 : 0;
+  cpu->crs->km.lt = 0;
 }
 #endif
 

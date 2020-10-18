@@ -34,6 +34,8 @@
 
 #include "opcode.h"
 
+#include "io.h"
+
 
 /* BDX
  * Branch on Decremented X
@@ -42,18 +44,31 @@
 #if defined R_MODE || defined V_MODE
 E50I(bdx)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bdx", ea);
 
   uint16_t x = G_X(cpu);
 
+#if defined(IDLE_WAIT)
+  if(cpu->bp == ea && cpu->crs->km.ie && (cpu->po & ea_r) == 0)
+  {
+    if(io_idle_wait(cpu, x))
+    {
+      S_X(cpu, 0);
+      longjmp(cpu->endop, endop_intrchk);
+    }
+
+    x = 1;
+  }
+#endif
+
   S_X(cpu, --x);
 
   if(x != 0)
     cpu->p = ea;
-  else
-    ++cpu->p;
+
+
 }
 #endif
 
@@ -65,7 +80,7 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE
 E50I(bix)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bix", ea);
 
@@ -75,8 +90,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(x != 0)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -88,7 +101,7 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE
 E50I(bdy)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bdy", ea);
 
@@ -98,8 +111,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(y != 0)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -111,7 +122,7 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE
 E50I(biy)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "biy", ea);
 
@@ -121,8 +132,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(y != 0)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -134,7 +143,7 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE
 E50I(beq)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "beq", ea);
 
@@ -144,15 +153,13 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_EQ(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
 
 E50I(bne)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bne", ea);
 
@@ -162,8 +169,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_NE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 
 
@@ -174,7 +179,7 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE
 E50I(bge)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bge", ea);
 
@@ -184,8 +189,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_GE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -197,7 +200,7 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE
 E50I(bgt)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bgt", ea);
 
@@ -207,8 +210,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_GT(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -220,7 +221,7 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE
 E50I(ble)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "ble", ea);
 
@@ -230,8 +231,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_LE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -243,7 +242,7 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined V_MODE || defined R_MODE
 E50I(blt)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "blt", ea);
 
@@ -253,8 +252,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_LT(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -266,14 +263,12 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE || defined I_MODE
 E50I(bceq)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bceq", ea);
 
   if(CC_EQ(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -285,14 +280,12 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE || defined I_MODE
 E50I(bcge)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bcge", ea);
 
   if(CC_GE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -304,14 +297,12 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE || defined I_MODE
 E50I(bcgt)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bcgt", ea);
 
   if(CC_GT(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -323,14 +314,12 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE || defined I_MODE
 E50I(bcle)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bcle", ea);
 
   if(CC_LE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -342,14 +331,12 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE || defined I_MODE
 E50I(bclt)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bclt", ea);
 
   if(CC_LT(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -361,14 +348,12 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE || defined I_MODE
 E50I(bcne)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bcne", ea);
 
   if(CC_NE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -380,14 +365,12 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE || defined I_MODE
 E50I(bcr)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bcr", ea);
 
   if(!cpu->crs->km.cbit)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -399,14 +382,12 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE || defined I_MODE
 E50I(bcs)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bcr", ea);
 
   if(cpu->crs->km.cbit)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -418,7 +399,7 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE
 E50I(bleq)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bleq", ea);
 
@@ -428,8 +409,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_EQ(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -441,7 +420,7 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE
 E50I(blne)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "blne", ea);
 
@@ -451,8 +430,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_NE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -464,7 +441,7 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE
 E50I(blle)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "blle", ea);
 
@@ -474,8 +451,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_LE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -487,7 +462,7 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE
 E50I(blgt)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "blgt", ea);
 
@@ -497,8 +472,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_GT(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -510,7 +483,7 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if 0 // Funtionally equal to BGE
 E50I(blge)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "blge", ea);
 
@@ -520,8 +493,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_GE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -533,7 +504,7 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if 0 // Funtionally equal to BLT
 E50I(bllt)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bllt", ea);
 
@@ -543,8 +514,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_LT(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -557,14 +526,12 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE || defined I_MODE
 E50I(blr)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "blr", ea);
 
   if(!cpu->crs->km.link)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -576,93 +543,79 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 #if defined R_MODE || defined V_MODE || defined I_MODE
 E50I(bls)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bls", ea);
 
   if(cpu->crs->km.link)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
 
 E50I(bmeq)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bmeq", ea);
 
   if(CC_EQ(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 
 
 E50I(bmge)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bmge", ea);
 
   if(cpu->crs->km.link)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 
 
 E50I(bmgt)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bmgt", ea);
 
   if(cpu->crs->km.link && CC_NE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 
 
 E50I(bmle)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bmle", ea);
 
   if((!cpu->crs->km.link) || CC_EQ(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 
 
 E50I(bmlt)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bmlt", ea);
 
-  if(!cpu->crs->km.link)
+  if(!(cpu->crs->km.link) || CC_GE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 
 
 E50I(bmne)
 {
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o(op, "bmne", ea);
 
   if(CC_NE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 
 
@@ -689,7 +642,7 @@ E50I(bheq)
 {
 int dr = op_dr(op);
 int16_t r = G_RH(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "bheq", dr, r, ea);
 
@@ -697,8 +650,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_EQ(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -708,7 +659,7 @@ E50I(bhge)
 {
 int dr = op_dr(op);
 int16_t r = G_RH(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "bhge", dr, r, ea);
 
@@ -716,8 +667,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_GE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -727,7 +676,7 @@ E50I(bhle)
 {
 int dr = op_dr(op);
 int16_t r = G_RH(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "bhle", dr, r, ea);
 
@@ -735,8 +684,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_LE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -746,7 +693,7 @@ E50I(bhlt)
 {
 int dr = op_dr(op);
 int16_t r = G_RH(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "bhlt", dr, r, ea);
 
@@ -754,8 +701,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_LT(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -765,7 +710,7 @@ E50I(bhne)
 {
 int dr = op_dr(op);
 int16_t r = G_RH(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "bhne", dr, r, ea);
 
@@ -773,8 +718,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_NE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -784,7 +727,7 @@ E50I(bhgt)
 {
 int dr = op_dr(op);
 int16_t r = G_RH(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "bhgt", dr, r, ea);
 
@@ -792,8 +735,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_GT(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -803,7 +744,7 @@ E50I(breq)
 {
 int dr = op_dr(op);
 int32_t r = G_R(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "breq", dr, r, ea);
 
@@ -811,8 +752,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_EQ(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -822,7 +761,7 @@ E50I(brge)
 {
 int dr = op_dr(op);
 int32_t r = G_R(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "brge", dr, r, ea);
 
@@ -830,8 +769,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_GE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -841,7 +778,7 @@ E50I(brle)
 {
 int dr = op_dr(op);
 int32_t r = G_R(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "brle", dr, r, ea);
 
@@ -849,8 +786,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_LE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -860,7 +795,7 @@ E50I(brlt)
 {
 int dr = op_dr(op);
 int32_t r = G_R(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "brlt", dr, r, ea);
 
@@ -868,8 +803,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_LT(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -879,7 +812,7 @@ E50I(brne)
 {
 int dr = op_dr(op);
 int32_t r = G_R(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "brne", dr, r, ea);
 
@@ -887,8 +820,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_NE(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -898,7 +829,7 @@ E50I(brgt)
 {
 int dr = op_dr(op);
 int32_t r = G_R(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "brgt", dr, r, ea);
 
@@ -906,8 +837,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(CC_GT(cpu))
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -918,14 +847,12 @@ E50I(brbr)
 int dr = op_dr(op);
 int bit = op[1] & 0b11111;
 uint32_t r = G_R(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "brbr", dr, r, ea);
 
   if(((0x80000000UL >> bit) & r) == 0)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -936,14 +863,12 @@ E50I(brbs)
 int dr = op_dr(op);
 int bit = op[1] & 0b11111;
 uint32_t r = G_R(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "brbs", dr, r, ea);
 
   if(((0x80000000UL >> bit) & r) != 0)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -953,7 +878,7 @@ E50I(bhi1)
 {
 int dr = op_dr(op);
 uint16_t r = G_RH(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "bhi1", dr, r, ea);
 
@@ -963,8 +888,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(r != 0)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -974,7 +897,7 @@ E50I(bhi2)
 {
 int dr = op_dr(op);
 uint16_t r = G_RH(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "bhi2", dr, r, ea);
 
@@ -984,8 +907,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(r != 0)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -995,7 +916,7 @@ E50I(bhi4)
 {
 int dr = op_dr(op);
 uint16_t r = G_RH(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "bhi4", dr, r, ea);
 
@@ -1005,8 +926,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(r != 0)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -1016,7 +935,7 @@ E50I(bri1)
 {
 int dr = op_dr(op);
 uint32_t r = G_R(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "bri1", dr, r, ea);
 
@@ -1026,8 +945,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(r != 0)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -1037,7 +954,7 @@ E50I(bri2)
 {
 int dr = op_dr(op);
 uint32_t r = G_R(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "bri2", dr, r, ea);
 
@@ -1047,8 +964,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(r != 0)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -1058,7 +973,7 @@ E50I(bri4)
 {
 int dr = op_dr(op);
 uint32_t r = G_R(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "bri4", dr, r, ea);
 
@@ -1068,8 +983,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(r != 0)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -1079,7 +992,7 @@ E50I(bhd1)
 {
 int dr = op_dr(op);
 uint16_t r = G_RH(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "bhd1", dr, r, ea);
 
@@ -1089,8 +1002,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(r != 0)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -1100,7 +1011,7 @@ E50I(bhd2)
 {
 int dr = op_dr(op);
 uint16_t r = G_RH(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "bhd2", dr, r, ea);
 
@@ -1110,8 +1021,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(r != 0)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -1121,7 +1030,7 @@ E50I(bhd4)
 {
 int dr = op_dr(op);
 uint16_t r = G_RH(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "bhd4", dr, r, ea);
 
@@ -1131,8 +1040,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(r != 0)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -1142,7 +1049,7 @@ E50I(brd1)
 {
 int dr = op_dr(op);
 uint32_t r = G_R(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "brd1", dr, r, ea);
 
@@ -1152,8 +1059,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(r != 0)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -1163,7 +1068,7 @@ E50I(brd2)
 {
 int dr = op_dr(op);
 uint32_t r = G_R(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "brd2", dr, r, ea);
 
@@ -1173,8 +1078,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(r != 0)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 
@@ -1184,7 +1087,7 @@ E50I(brd4)
 {
 int dr = op_dr(op);
 uint32_t r = G_R(cpu, dr);
-uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
+uint16_t ea = E50X(vfetch_iw)(cpu);
 
   logop2o3(op, "brd4", dr, r, ea);
 
@@ -1194,8 +1097,6 @@ uint16_t ea = E50X(vfetch_w)(cpu, cpu->pb);
 
   if(r != 0)
     cpu->p = ea;
-  else
-    ++cpu->p;
 }
 #endif
 

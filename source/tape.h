@@ -76,9 +76,9 @@ int pending;
     pthread_mutex_t mutex;
     pthread_cond_t cond;
   } pthread;
-  enum { current_status_word=0, id_number=1, dmx_channel_number=2, vector_interrupt_address=3 } cdr;
+  enum { current_status_word=0, id_number=1, dmx_channel_number=2, vector_interrupt_address=3, current_status_word2=4 } cdr;
   union {
-    uint16_t dr[4];
+    uint16_t dr[5];
     struct {
       uint16_t sw;
 #define MT_SW_PAR 0x8000
@@ -99,14 +99,31 @@ int pending;
 #define MT_SW_INT 0x0001
       uint16_t id;
       uint16_t dc;
-#define MT_DC_DMC 0x800
-#define MT_DC_CHA 0x7FF
       uint16_t va;
+      uint16_t s2;
+#define MT_S2_NRZ 0x8000
+#define MT_S2_PE  0x4000
+#define MT_S2_7TR 0x2000
+#define MT_S2_IDB 0x1000
+#define MT_S2_REJ 0x0800
+#define MT_S2_SCE 0x0400
+#define MT_S2_STE 0x0200
+#define MT_S2_MTE 0x0100
+#define MT_S2_UN1 0x0080
+#define MT_S2_PCE 0x0040
+#define MT_S2_PDE 0x0020
+#define MT_S2_POE 0x0010
+#define MT_S2_ILL 0x0008
+#define MT_S2_UN2 0x0004
+#define MT_S2_NSE 0x0002
+#define MT_S2_EDE 0x0001
     };
   };
   uint16_t mo;
+  uint16_t ms;
   int ff;
   int dv;
+  int in;
   intr_t intr;
   tm_t tm[4];
 } mt_t;
@@ -132,11 +149,18 @@ off_t rc = lseek(tm->fd, 0, SEEK_SET);
   return rc ? rc : MT_BOT;
 }
 
+static inline ssize_t mt_erase(tm_t *tm)
+{
+off_t pos = lseek(tm->fd, 0, SEEK_CUR);
+
+  return ftruncate(tm->fd, pos) ? MT_ERR : 0;
+}
+
 static inline ssize_t mt_read(tm_t *tm, uint8_t *rec, size_t len)
 {
 uint32_t meta;
 ssize_t rc, bln, pln;
-/* off_t pos; */
+off_t org = lseek(tm->fd, 0, SEEK_CUR);
 
   rc = read(tm->fd, &meta, sizeof(meta));
 
@@ -154,7 +178,7 @@ ssize_t rc, bln, pln;
 
   if(IS_EOM(meta))
   {
-    /* pos = */ lseek(tm->fd, -sizeof(meta), SEEK_CUR);
+    /* pos = */ lseek(tm->fd, org, SEEK_SET);
     return MT_EOM;
   }
 
@@ -163,46 +187,113 @@ ssize_t rc, bln, pln;
 
   if(IS_ERR(meta))
   {
-    /* pos = */ lseek(tm->fd, pln + sizeof(meta), SEEK_CUR);
+    /* pos = */ lseek(tm->fd, pln, SEEK_CUR);
+    rc = read(tm->fd, &meta, sizeof(meta));
+
+    if(rc < sizeof(meta) || MT_BLN(meta) != bln)
+      lseek(tm->fd, org, SEEK_SET);
+
     return MT_ERR;
   }
 
   if(len >= bln)
   {
-    rc = read(tm->fd, rec, bln);
+    if(rec)
+      rc = read(tm->fd, rec, bln);
+    else
+    {
+      rc = lseek(tm->fd, bln, SEEK_CUR);
+      if(rc >= 0)
+        rc = bln;
+    }
+
+    if(rc < bln)
+    {
+      lseek(tm->fd, org, SEEK_SET);
+      return MT_ERR;
+    }
     if(pln > bln)
       /* pos = */ lseek(tm->fd, pln - bln, SEEK_CUR);
   }
   else
   {
-    rc = read(tm->fd, rec, len);
+    if(rec)
+      rc = read(tm->fd, rec, len);
+    else
+    {
+      rc = lseek(tm->fd, len, SEEK_CUR);
+      if(rc >= 0)
+        rc = len;
+    }
+
+    if(rc < len)
+    {
+      lseek(tm->fd, org, SEEK_SET);
+      return MT_ERR;
+    }
+
     /* pos = */ lseek(tm->fd, pln - len, SEEK_CUR);
   }
 
   rc = read(tm->fd, &meta, sizeof(meta));
 
-  if(MT_BLN(meta) != bln)
+  if(rc < sizeof(meta) || MT_BLN(meta) != bln)
+  {
+    lseek(tm->fd, org, SEEK_SET);
+
     return MT_ERR;
+  }
 
   return bln;
+}
+
+static inline ssize_t mt_fsr(tm_t *tm, size_t count)
+{
+ssize_t rc;
+
+  for(size_t n = 0; n <= count; ++n)
+  {
+    rc = mt_read(tm, NULL, 0);
+    if(rc < 0)
+      break;
+  }
+
+  return rc;
+}
+
+static inline ssize_t mt_fsf(tm_t *tm, size_t count)
+{
+ssize_t rc;
+
+  for(size_t n = 0; n <= count; ++n)
+  {
+    do {
+      rc = mt_read(tm, NULL, 0);
+    } while(rc > 0);
+
+    if(rc < 0 && rc != MT_TMK)
+      break;
+  }
+
+  return rc;
 }
 
 static inline ssize_t mt_rdbk(tm_t *tm, uint8_t *rec, size_t len)
 {
 uint32_t meta;
 ssize_t /* rc, */ bln, pln;
-off_t pos;
+off_t pos; // org = lseek(tm->fd, 0, SEEK_CUR);
 
   pos = lseek(tm->fd, -sizeof(meta), SEEK_CUR);
 
-  if(pos <= 0)
+  if(pos < 0)
     return MT_BOF;
 
   /* rc = */ read(tm->fd, &meta, sizeof(meta));
 
   if(IS_TMK(meta))
   {
-    pos = lseek(tm->fd, -sizeof(meta), SEEK_CUR);
+    /* pos = */ lseek(tm->fd, -sizeof(meta), SEEK_CUR);
     return MT_TMK;
   }
 
@@ -211,34 +302,71 @@ off_t pos;
 
   if(IS_ERR(meta))
   {
-    pos = lseek(tm->fd, -(pln + 2*sizeof(meta)), SEEK_CUR);
+    /* pos = */ lseek(tm->fd, -(pln + 2*sizeof(meta)), SEEK_CUR);
     return MT_ERR;
   }
 
   if(len >= bln)
   {
-    pos = lseek(tm->fd, -(pln + sizeof(meta)), SEEK_CUR);
+    /* pos = */ lseek(tm->fd, -(pln + sizeof(meta)), SEEK_CUR);
 
-    /* rc = */ read(tm->fd, rec, bln);
+    if(rec)
+      /* rc = */ read(tm->fd, rec, bln);
+    else
+      lseek(tm->fd, bln, SEEK_CUR);
 
-    pos = lseek(tm->fd, -(bln + sizeof(meta)), SEEK_CUR);
+    /* pos = */ lseek(tm->fd, -(bln + sizeof(meta)), SEEK_CUR);
   }
   else
   {
-    pos = lseek(tm->fd, -((pln - (bln - len)) + sizeof(meta)), SEEK_CUR);
+    /* pos = */ lseek(tm->fd, -((pln - (bln - len)) + sizeof(meta)), SEEK_CUR);
 
-    /* rc = */ read(tm->fd, rec, len);
+    if(rec)
+      /* rc = */ read(tm->fd, rec, len);
+    else
+      lseek(tm->fd, len, SEEK_CUR);
 
-    pos = lseek(tm->fd, -(bln + sizeof(meta)), SEEK_CUR);
+    /* pos = */ lseek(tm->fd, -(bln + sizeof(meta)), SEEK_CUR);
   }
 
   return bln;
 }
 
+static inline ssize_t mt_bsr(tm_t *tm, size_t count)
+{
+ssize_t rc;
+
+  for(size_t n = 0; n <= count; ++n)
+  {
+    rc = mt_rdbk(tm, NULL, 0);
+    if(rc < 0)
+      break;
+  }
+
+  return rc;
+}
+
+static inline ssize_t mt_bsf(tm_t *tm, size_t count)
+{
+ssize_t rc;
+
+  for(size_t n = 0; n <= count; ++n)
+  {
+    do {
+      rc = mt_rdbk(tm, NULL, 0);
+    } while(rc > 0);
+
+    if(rc < 0 && rc != MT_TMK)
+      break;
+  }
+
+  return rc;
+}
+
 static inline ssize_t mt_write(tm_t *tm, uint8_t *rec, size_t len)
 {
 uint32_t meta = len;
-ssize_t pln = (len + 1) & ~1;
+size_t pln = (len + 1) & ~1;
 uint8_t pad = 0;
 /* ssize_t rc; */
 
@@ -263,42 +391,25 @@ uint8_t pad = 0;
   return len;
 }
 
-static inline ssize_t mt_fsf(tm_t *tm)
+static inline ssize_t mt_wtm(tm_t *tm, size_t count)
 {
 ssize_t rc;
 
-  do {
-    rc = mt_read(tm, NULL, 0);
-  } while(rc > 0);
+  for(size_t n = 0; n <= count; ++n)
+  {
+    rc = mt_write(tm, NULL, 0);
 
-  return rc;
-}
-
-static inline ssize_t mt_bsf(tm_t *tm)
-{
-ssize_t rc;
-
-  do {
-    rc = mt_rdbk(tm, NULL, 0);
-  } while(rc > 0);
+    if(rc < 0 || rc != MT_WTM)
+      break;
+  }
 
   return rc;
 }
 
 static inline int mt_close(tm_t *tm)
 {
-//uint32_t meta = _MT_EOM;
-//ssize_t rc;
-
   if(tm->fd < 0)
     return 0;
-
-//if(tm->md == wr)
-//{
-//  rc = write(tm->fd, &meta, sizeof(meta));
-//  off_t pos = lseek(tm->fd, 0, SEEK_CUR);
-//  ftruncate(tm->fd, pos);
-//}
 
   tm->md = cl;
   close(tm->fd);
@@ -332,7 +443,7 @@ static inline int mt_stat(tm_t *tm)
 
   off_t pos = lseek(tm->fd, 0, SEEK_CUR);
 
-  if(pos <= sizeof(uint32_t))
+  if(pos < sizeof(uint32_t))
     return MT_BOT;
 
   struct stat st;
