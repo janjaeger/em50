@@ -648,7 +648,7 @@ E50I(int)
 
   int32_t l = dac;
 
-  l = from31(l);
+  l = fr31(l);
   S_L(cpu, l);
 
   cpu->crs->km.cbit = 0;

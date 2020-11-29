@@ -58,6 +58,8 @@ typedef struct cp_t {
   struct intr_t intr;
 } cp_t;
 
+#define SOC_LFC_NSEC 20000000ULL
+
 int cntl_io(cpu_t *cpu, int, int, int, int, void **, int, char *[]);
 
 #endif

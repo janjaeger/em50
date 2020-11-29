@@ -130,7 +130,7 @@ E50I(lle)
   else
     S_RH(cpu, dr, 0);
 #else
-int16_t a = (int16_t)G_A(cpu);
+  int16_t a = (int16_t)G_A(cpu);
 
   SET_CC(cpu, a);
 

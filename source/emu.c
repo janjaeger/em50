@@ -39,12 +39,22 @@
 #define SIGHANDLER
 
 #ifdef SIGHANDLER
-__thread cpu_t *cput = NULL;
+static pthread_once_t once = PTHREAD_ONCE_INIT;
+
+static pthread_key_t cput;
+
+static void key_create(void)
+{
+  pthread_key_create(&cput, NULL);
+}
+
 void mach_chk(cpu_t *, uint32_t);
 static void handler(int signo)
 {
-  if(cput)
-    mach_chk(cput, signo);
+cpu_t *cpu = pthread_getspecific(cput);
+
+  if(cpu)
+    mach_chk(cpu, signo);
   else
     raise(signo);
 }
@@ -83,7 +93,8 @@ static void *cpu_thread(void *arg)
 cpu_t *cpu = arg;
 
 #ifdef SIGHANDLER
-cput = cpu;
+  pthread_once(&once, key_create);
+  pthread_setspecific(cput, cpu);
 #endif
 
   pthread_setname_np(pthread_self(), "cpu");
@@ -135,7 +146,6 @@ int em50_init(cpu_t *cpu)
 #endif
 
   io_intr_init(cpu);
-  cpu_wait_init(cpu);
   cpu_halt_init(cpu);
 
   signal(SIGPIPE, SIG_IGN);

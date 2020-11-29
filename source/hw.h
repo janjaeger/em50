@@ -218,6 +218,8 @@ typedef uint32_t ea_t; // Effecvice Address
 #define ea_page(_ea)  (((_ea) & ea_p) >> ea_p_s)
 #define ea_off(_ea)   ((_ea) & ea_o)
 #define ea_fault(_ea) ((_ea) & ea_f)
+#define ea_pgad(_ea)  ((_ea) & (ea_s|ea_p))
+#define io_seg(_ea)   (ea_seg((_ea)) < 4)
 
 
 typedef uint32_t dtar_t;
@@ -349,7 +351,7 @@ typedef struct mrf_t {
 /*023*/                  uint32_t parreg2;
 /*024*/                  uint32_t dswparity2;
 /*025*/                  uint32_t pbsave;
-/*026*/                  uint32_t sysreg1;
+/*026*/                  uint32_t chkreg;
 /*027*/                  uint32_t dswparity;
 /*030*/                  uint32_t pswpb;
 /*031*/                  km_t     pswkeys;

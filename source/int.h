@@ -31,8 +31,26 @@
 #ifndef _int_h
 #define _int_h
 
-#define to31(_v)   (((int32_t)((_v) & 0xffff0000) >> 1) | ((_v) & 0x7fff))
-#define from31(_v) (((int32_t)((_v) & 0x7fff8000) << 1) | ((_v) & 0x7fff))
+static inline int32_t to31(int32_t v)
+{
+  return ((int32_t)(v & 0xffff0000) >> 1) | (v & 0x7fff);
+}
+
+static inline int32_t to31h(int32_t v)
+{
+  return (v & 0xffff0000) | ((v & 0x7fff) << 1);
+}
+
+
+static inline int32_t fr31(int32_t v)
+{
+  return ((int32_t)(v & 0x7fff8000) << 1) | (v & 0x7fff);
+}
+
+static inline int32_t fr31h(int32_t v)
+{
+  return (v & 0xffff0000) | ((v & 0xfffe) >> 1);
+}
 
 
 static inline int16_t _add_w(uint16_t a, uint16_t b, uint16_t c, int *eq, int *lt, int *car, int *ovf)
@@ -99,27 +117,14 @@ static inline uint32_t sba_d(uint32_t a, uint32_t b, int *eq, int *lt, int *car,
   return _add_d(a, ~b, 1, eq, lt, car, ovf);
 }
 
-#define _fr31(_v) (((_v) & 0xffff0000) | (((_v) & 0x7fff) << 1))
-#define _to31(_v) (((_v) & 0xffff0000) | (((_v) & 0xfffe) >> 1))
-
 static inline uint32_t add_d31(uint32_t a, uint32_t b, int *eq, int *lt, int *car, int *ovf)
 {
-  a = _fr31(a);
-  b = _fr31(b);
-  uint32_t r = add_d(a, b, eq, lt, car, ovf);
-  r = _to31(r);
-
-  return r;
+  return fr31h(add_d(to31h(a), to31h(b), eq, lt, car, ovf));
 }
 
 static inline uint32_t sba_d31(uint32_t a, uint32_t b, int *eq, int *lt, int *car, int *ovf)
 {
-  a = _fr31(a);
-  b = _fr31(b);
-  uint32_t r = sba_d(a, b, eq, lt, car, ovf);
-  r = _to31(r);
-
-  return r;
+  return fr31h(sba_d(to31h(a), to31h(b), eq, lt, car, ovf));
 }
 
 #endif

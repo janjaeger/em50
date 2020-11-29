@@ -55,10 +55,10 @@ E50I(lpsw)
   if((cpu->crs->km.sm ^ km.sm))
     mm_ptlb(cpu);
 
-  cpu->crs->km = km;
   set_crs(cpu, km.crs);
 
-logmsg("km.in %d km.sd %d\n", km.in, km.sd);
+  cpu->crs->km = km;
+
   if(km.in)
     E50X(pxm_disp)(cpu);
 
@@ -79,19 +79,20 @@ int16_t a = G_A(cpu);
 
   E50X(rxm_check)(cpu);
 
-  if(cpu->crs->km.pxm)
+  uint32_t owner = cpu->crs->owner;
+
+  if(cpu->crs->km.pxm && owner)
   {
-    uint32_t owner = cpu->crs->owner;
+    int32_t timer = E50X(timer_get)(cpu);
 
-    uint32_t timer = E50X(timer_get)(cpu);
+    uint32_t etimer = E50X(vfetch_dp)(cpu, owner + offsetin(pcb_t, etimer));
 
-    uint32_t etimer = E50X(vfetch_d)(cpu, owner + offsetin(pcb_t, etimer));
     int16_t itimerh = timer >> 16;
 
-    etimer += itimerh - a;
+    etimer += (uint32_t)itimerh - (uint32_t)a;
     itimerh = a;
 
-    E50X(vstore_d)(cpu, owner + offsetin(pcb_t, etimer), etimer);
+    E50X(vstore_dp)(cpu, owner + offsetin(pcb_t, etimer), etimer);
 
     E50X(timer_set)(cpu, (itimerh << 16) | (timer & 0x0000ffff));
   }
@@ -110,7 +111,7 @@ uint32_t ea = G_XB(cpu);
 
   E50X(vstore_d)(cpu, intraseg_i(ea, 1), timer);
   
-  if(cpu->crs->km.pxm)
+  if(cpu->crs->km.pxm && owner)
   {
     timer >>= 16;
     timer += (int32_t)E50X(vfetch_dp)(cpu, owner + offsetin(pcb_t, etimer));
@@ -131,8 +132,11 @@ uint32_t l = G_L(cpu);
   E50X(rxm_check)(cpu);
 
   mm_itlb(cpu, ap);
-  mm_itlb(cpu, l);
-  i2r(cpu, ap);
+
+  if(!io_seg(l))
+    mm_itlb(cpu, l);
+
+  E50X(v2r)(cpu, ap, acc_io);
 }
 
 
@@ -140,7 +144,7 @@ E50I(itlb)
 {
 uint32_t l = G_L(cpu);
 
-  logop1o(op, "itlb", l);
+  logop1o(op, "*itlb", l);
 
   E50X(rxm_check)(cpu);
 

@@ -48,8 +48,7 @@
 #define logdac(_c, _s, _a) \
 do { \
   em50_dbl dac = { .q = G_DAC(_c, _a) }; \
-  double dbl = to_dbl(dac.q); \
-  logmsg("-> flpt " _s " sign %d mantissa %11.11lx exponent %4.4x (%e)\n", dac.sign, (long unsigned int)dac.mantissa, dac.exponent, dbl); \
+  logmsg("-> flpt " _s " sign %d mantissa %11.11lx exponent %4.4x (%e)\n", dac.sign, (long unsigned int)dac.mantissa, dac.exponent, (double)to_dbl(dac.q)); \
 } while (0)
 #else
 #define logdac(_c, _s, _a)

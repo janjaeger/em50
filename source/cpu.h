@@ -45,9 +45,10 @@ static inline void cpu_reset(cpu_t *cpu)
 {
   memset(&(cpu->srf), 0, sizeof(cpu->srf));
   mm_ptlb(cpu);
+  mm_piotlb(cpu);
   cpu->crn = 0;
   cpu->crs = &cpu->srf.urs[0];
-  cpu->crs->timer = 0 - em50_timer();
+  cpu->crs->timer = 0;
   S_DMA_0(cpu, 6, 01000);
   S_RB(cpu, RESET_PC);
 }

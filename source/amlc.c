@@ -48,10 +48,6 @@
 #define logmsg(...) logall(__VA_ARGS__)
 #endif
 
-#define AMLC_BACKLOG 5
-#define AMLC_DFLTPORT 2323
-#define AMLC_MAXDEV 8
-
 #ifdef LIBTELNET
 static const telnet_telopt_t telopts[] = {
   { TELNET_TELOPT_BINARY,    TELNET_WILL, TELNET_DO   },
@@ -73,6 +69,8 @@ static inline line_t *amlc_getfreeline(cpu_t *cpu)
 
     if(amlc)
     {
+      pthread_mutex_lock(&(amlc->pthread.mutex));
+
       for(int l = 0; l < AMLC_LINES; ++l)
       {
       line_t *line = &amlc->ln[l];
@@ -80,11 +78,14 @@ static inline line_t *amlc_getfreeline(cpu_t *cpu)
         if(line->fds == -1 && line->fdr == -1 && line->ls == offl)
           return line;
       }
+
+      pthread_mutex_unlock(&(amlc->pthread.mutex));
     }
   }
 
   return NULL;
 }
+
 
 static inline line_t *amlc_getline(cpu_t *cpu, int ctrl, int ln)
 {
@@ -113,6 +114,10 @@ static inline void amlc_reassign(line_t *line, int amlc, int ln)
   line_t *newline = amlc_getline(line->amlc->cpu, amlc, ln);
   if(newline)
   {
+#ifdef DEBUG
+cpu_t *cpu = line->amlc->cpu;
+logmsg("amlc %03o reassign line %d -> %03o:%d\n", line->amlc->ctrl, line->no, newline->amlc->ctrl, newline->no);
+#endif
     if(newline->amlc != line->amlc)
       pthread_mutex_lock(&(newline->amlc->pthread.mutex));
 #ifdef LIBTELNET
@@ -122,6 +127,9 @@ static inline void amlc_reassign(line_t *line, int amlc, int ln)
 #endif
     newline->fds = line->fds; line->fds = -1;
     newline->fdr = line->fdr; line->fdr = -1;
+    newline->conn.inbinary = line->conn.inbinary; line->conn.inbinary = 0;
+    newline->conn.outbinary = line->conn.outbinary; line->conn.outbinary = 0;
+    newline->conn.amlc = newline->conn.ln = line->conn.amlc = line->conn.ln = 0;
     newline->ls = line->ls;   line->ls = offl;
     newline->ds = (ln << 12) | AMLC_DS_DSC3 | AMLC_DS_DSC2 | AMLC_DS_DSC1;
 
@@ -223,7 +231,7 @@ logmsg("amlc %03o eor ra %d stat %4.4x int %4.4x ena %d\n", amlc->ctrl, amlc->ra
 
 static inline void amlc_rxchar(line_t *line, uint8_t ch)
 {
-  amlc_rxword(line, AMLC_RX_VAL | ch);
+  amlc_rxword(line, AMLC_RX_VAL | (ch & amlc_cl_mask[line->cf & AMLC_CF_CLEN] & (line->conn.inbinary ? 0xff : 0x7f)));
 }
 
 
@@ -256,11 +264,12 @@ static void amlc_getenviron(telnet_t *telnet, line_t *line, unsigned char type, 
     if(!strcmp(amlcvar, var))
     {
     int amlc, ln; char c;
-      if(sscanf(value, "%o%c%d%c", &amlc, &c, &ln, &c) == 3)
+      if(sscanf(value, "%o%c%d%c", &amlc, &c, &ln, &c) == 3 && amlc)
         amlc_reassign(line, amlc, ln);
     }
   }
 }
+
 
 static void amlc_telnet_event(telnet_t *telnet, telnet_event_t *ev, void *parm)
 {
@@ -290,6 +299,9 @@ cpu_t *cpu = line->amlc->cpu;
       break;  
     case TELNET_EV_WILL: // request to enable remote feature (or receipt)
       switch(ev->neg.telopt) {
+        case TELNET_TELOPT_BINARY:
+          line->conn.inbinary = 1;
+          break;
         case TELNET_TELOPT_ENVIRON:
           amlc_setenviron(telnet, line, 0);
           break;
@@ -298,10 +310,18 @@ cpu_t *cpu = line->amlc->cpu;
       }
       break;
     case TELNET_EV_WONT: // notification of disabling remote feature (or receipt)
+      switch(ev->neg.telopt) {
+        case TELNET_TELOPT_BINARY:
+          line->conn.inbinary = 0;
+          break;
+        default:
+          break;
+      }
       break;
     case TELNET_EV_DO: // request to enable local feature (or receipt)
       switch(ev->neg.telopt) {
         case TELNET_TELOPT_BINARY:
+          line->conn.outbinary = 1;
           break;
         case TELNET_TELOPT_COMPRESS2:
           telnet_begin_compress2(telnet);
@@ -316,6 +336,7 @@ cpu_t *cpu = line->amlc->cpu;
     case TELNET_EV_DONT: // demand to disable local feature (or receipt)
       switch(ev->neg.telopt) {
         case TELNET_TELOPT_BINARY:
+          line->conn.outbinary = 0;
           break;
         default:
           break;
@@ -340,13 +361,17 @@ cpu_t *cpu = line->amlc->cpu;
 
 static inline int amlc_attach(cpu_t *cpu, int fd)
 {
-line_t *line = amlc_getfreeline(cpu);
+  line_t *line = amlc_getfreeline(cpu);
 
   if(!line)
     return -1;
 
+  line->conn.amlc = line->conn.ln = line->conn.inbinary = line->conn.outbinary = 0;
+
   line->fds = line->fdr = fd;
-  line->ls = pend;
+  line->ls = conn;
+
+  pthread_mutex_unlock(&(line->amlc->pthread.mutex));
 
   return 0;
 }
@@ -359,6 +384,7 @@ static inline void amlc_detach(line_t *line)
     close(line->fds);
   line->fdr = line->fds = -1;
   line->ls = offl;
+  line->conn.amlc = line->conn.ln = line->conn.inbinary = line->conn.outbinary = 0;
 
 #ifdef LIBTELNET
   if(line->telnet)
@@ -374,6 +400,7 @@ static inline void amlc_detach(line_t *line)
   }
 #endif
 }
+
 
 static inline void amlc_loop(line_t *line)
 {
@@ -519,7 +546,7 @@ fd_set fdset;
         continue;
       }
 
-      if((rc = amlc_attach(cpu, fd)))
+      if(amlc_attach(cpu, fd))
       {
         logmsg("amlc-l No line available\n");
         close(fd);
@@ -555,7 +582,7 @@ static inline int amlc_send(line_t *line, uint8_t ch)
   if(line->ls != loop)
   {
 #ifdef LIBTELNET
-    char c = ch & 0x7f;
+    char c = ch & amlc_cl_mask[line->cf & AMLC_CF_CLEN] & (line->conn.outbinary ? 0xff : 0x7f);
     telnet_send(line->telnet, &c, 1);   
     return 1;
 #else
@@ -594,6 +621,7 @@ char c;
   return rc;
 }
 
+
 static void *amlc_thread(void *parm)
 {
 amlc_t *amlc = parm;
@@ -623,7 +651,7 @@ logmsg("amlc %03o int stat %04x\n", amlc->ctrl, amlc->st);
     pthread_mutex_unlock(&(amlc->pthread.mutex));
     int didsend = 0;
 
-    for(int ln = 0; ln < (sizeof(amlc->ln)/sizeof(*amlc->ln)); ++ln)
+    for(int ln = 0; ln < AMLC_LINES; ++ln)
     {
       line_t *line = &amlc->ln[ln];
 
@@ -673,7 +701,7 @@ logmsg("amlc %03o line %d send failed\n", amlc->ctrl, ln);
     FD_ZERO(&fdrset);
 
     pthread_mutex_lock(&(amlc->pthread.mutex));
-    for(int ln = 0; ln < (sizeof(amlc->ln)/sizeof(*amlc->ln)); ++ln)
+    for(int ln = 0; ln < AMLC_LINES; ++ln)
     {
     line_t *line = &amlc->ln[ln];
 
@@ -698,39 +726,19 @@ logmsg("amlc %03o line %d connected\n",amlc->ctrl, ln);
         telnet_negotiate(line->telnet, TELNET_DO,   TELNET_TELOPT_ECHO);
         telnet_negotiate(line->telnet, TELNET_WILL, TELNET_TELOPT_SGA);
         telnet_negotiate(line->telnet, TELNET_DO,   TELNET_TELOPT_SGA);
-        telnet_negotiate(line->telnet, TELNET_WILL, TELNET_TELOPT_BINARY);
+
+        if(line->conn.outbinary)
+          telnet_negotiate(line->telnet, TELNET_WILL, TELNET_TELOPT_BINARY);
         telnet_negotiate(line->telnet, TELNET_DO,   TELNET_TELOPT_BINARY);
 
-        telnet_negotiate(line->telnet, TELNET_WILL, TELNET_TELOPT_ENVIRON);
-        telnet_negotiate(line->telnet, TELNET_DO,   TELNET_TELOPT_ENVIRON);
+        if(line->conn.amlc)
+        {
+          telnet_negotiate(line->telnet, TELNET_WILL, TELNET_TELOPT_ENVIRON);
+          telnet_negotiate(line->telnet, TELNET_DO,   TELNET_TELOPT_ENVIRON);
+        }
 #endif
 
         amlc->st |= (amlc->st & ~AMLC_ST_LINE) | ln | AMLC_ST_DSC;
-        line->ds = (ln << 12) | AMLC_DS_DSC3 | AMLC_DS_DSC2 | AMLC_DS_DSC1;
-
-        continue;
-      }
-
-      if(line->ls == pend)
-      {
-logmsg("amlc %03o line %d online\n",amlc->ctrl, ln);
-
-#ifdef LIBTELNET
-        void **parm = malloc(sizeof(void*));
-        *parm = line;
-        line->tnparm = parm;
-        line->telnet = telnet_init(telopts, amlc_telnet_event, 0, parm);
-        telnet_negotiate(line->telnet, TELNET_WILL, TELNET_TELOPT_ECHO);
-        telnet_negotiate(line->telnet, TELNET_DO,   TELNET_TELOPT_ECHO);
-        telnet_negotiate(line->telnet, TELNET_WILL, TELNET_TELOPT_SGA);
-        telnet_negotiate(line->telnet, TELNET_DO,   TELNET_TELOPT_SGA);
-        telnet_negotiate(line->telnet, TELNET_WILL, TELNET_TELOPT_BINARY);
-        telnet_negotiate(line->telnet, TELNET_DO,   TELNET_TELOPT_BINARY);
-#endif
-
-        line->ls = onln;
-        amlc->st |= (amlc->st & ~AMLC_ST_LINE) | ln | AMLC_ST_DSC;
-
         line->ds = (ln << 12) | AMLC_DS_DSC3 | AMLC_DS_DSC2 | AMLC_DS_DSC1;
 
         continue;
@@ -745,7 +753,7 @@ logmsg("amlc %03o line %d online\n",amlc->ctrl, ln);
     int didrecv = 0;
     if(rc > 0)
     {
-      for(int ln = 0; ln < (sizeof(amlc->ln)/sizeof(*amlc->ln)); ++ln)
+      for(int ln = 0; ln < AMLC_LINES; ++ln)
       {
       line_t *line = &amlc->ln[ln];
   
@@ -757,6 +765,8 @@ logmsg("amlc %03o line %d online\n",amlc->ctrl, ln);
 
         if(!amlc_canrx(amlc))
           continue;
+
+        FD_CLR(line->fdr, &fdrset);
 
         if(amlc_recv(line) != 1)
         {
@@ -775,8 +785,8 @@ logmsg("amlc line %d closed\n", ln);
         continue;
       }
     }
-    else
-      for(int ln = 0; ln < (sizeof(amlc->ln)/sizeof(*amlc->ln)); ++ln)
+    else if(rc == 0)
+      for(int ln = 0; ln < AMLC_LINES; ++ln)
       {
       line_t *line = &amlc->ln[ln];
         if((line->cn & AMLC_CN_TIME) && !(amlc->st & AMLC_ST_EOR))
@@ -814,7 +824,7 @@ static inline void amlc_init(cpu_t *cpu, int type, int ext, int func, int ctrl, 
   (*amlc)->ctrl = ctrl;
   (*amlc)->va = 0154;
 
-  for(int ln = 0; ln < (sizeof((*amlc)->ln)/sizeof(*(*amlc)->ln)); ++ln)
+  for(int ln = 0; ln < AMLC_LINES; ++ln)
   {
     (*amlc)->ln[ln].no = ln;
     (*amlc)->ln[ln].fds = (*amlc)->ln[ln].fdr = -1;
@@ -933,12 +943,16 @@ amlc_t *amlc = *devparm;
             break;
           case 001:  // Output Line Configuration
             logmsg("amlc %03o Output Line Configuration %4.4x\n", ctrl, a);
-            amlc->ln[a >> 12].cf = a;
+            if((amlc->ln[a >> 12].cf & AMLC_CF_DSC) && !(a & AMLC_CF_DSC) && amlc->ln[a >> 12].ls != offl)
+            {
+              amlc->ln[a >> 12].cf = a;
+              amlc_detach(&amlc->ln[a >> 12]);
+            }
+            else
+              amlc->ln[a >> 12].cf = a;
             if((amlc->ln[a >> 12].cf & AMLC_CF_LOOP) && amlc->ln[a >> 12].ls != loop)
               amlc_loop(&amlc->ln[a >> 12]);
             if(!(amlc->ln[a >> 12].cf & AMLC_CF_LOOP) && amlc->ln[a >> 12].ls == loop)
-              amlc_detach(&amlc->ln[a >> 12]);
-            if((amlc->ln[a >> 12].cf & AMLC_CF_DSC) && amlc->ln[a >> 12].ls != offl)
               amlc_detach(&amlc->ln[a >> 12]);
             break;
           case 002:  // Output Line Control
@@ -1008,8 +1022,6 @@ amlc_t *amlc = *devparm;
             amlc->dm = 0;
             amlc->im = 0;
             amlc->ca = 0;
-            for(int l = 0; l > AMLC_LINES; ++l)
-              amlc_detach(&amlc->ln[l]);
           }
           break;
         default:
@@ -1067,28 +1079,32 @@ amlc_t *amlc = *devparm;
           break;
         }
 
-        line_t *line = &amlc->ln[ln];
-        if(line->ls != offl)
-        {
-          printf("amlc %03o line %d in use\n", ctrl, ln);
-          break;
-        }
-
+        int namlc, nline;
         if(aamlc && aline)
         {
-          if(sscanf(aamlc,"%o%c", &line->conn.amlc, &c) != 1
-            || line->conn.amlc < 0 || line->conn.amlc >= 0100)
+          if(sscanf(aamlc,"%o%c", &namlc, &c) != 1
+            || namlc < 0 || namlc >= 0100)
           {
             printf("amlc %03o line %d invalid target amlc device %s\n", ctrl, ln, aamlc);
             break;
           }
 
-          if(sscanf(aline,"%d%c", &line->conn.ln, &c) != 1
-            || line->conn.ln < 0 || line->conn.ln >= AMLC_LINES)
+          if(sscanf(aline,"%d%c", &nline, &c) != 1
+            || nline < 0 || nline >= AMLC_LINES)
           {
             printf("amlc %03o line %d invalid target line number %s\n", ctrl, ln, aline);
             break;
           }
+        }
+        else
+          namlc = nline = 0;
+
+        line_t *line = &amlc->ln[ln];
+
+        if(line->ls != offl)
+        {
+          printf("amlc %03o line %d in use\n", ctrl, ln);
+          break;
         }
 
         int port = amlc_inet_port(cpu, aport);
@@ -1106,33 +1122,49 @@ amlc_t *amlc = *devparm;
         }
 
         int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        ioctl(fd, FIOCLEX, NULL);
         if(fd < 0)
         {
           printf("amlc %03o socket: %s\n", ctrl, strerror(errno));
           break;
         }
-
-        struct sockaddr_in sockaddr = {.sin_family = AF_INET, .sin_port = htons(port), .sin_addr.s_addr = host};
-        if(connect(fd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)))
-        {
-          printf("amlc %03o line %d connect %s:%s failed: %s\n", ctrl, ln, ahost, aport, strerror(errno));
-          close(fd);
-          break;
-        }
-
-        if(aamlc && aline)
-          printf("amlc %03o line %d connecting to %s:%s amlc %03o line %d\n", ctrl, ln, ahost, aport, line->conn.amlc, line->conn.ln);
-        else
-          printf("amlc %03o line %d connecting to %s:%s\n", ctrl, ln, ahost, aport);
+        ioctl(fd, FIOCLEX, NULL);
 
         pthread_mutex_lock(&amlc->pthread.mutex);
         if(line->ls == offl)
         {
           line->fds = line->fdr = fd;
-          line->ls = aamlc ? conn : pend;
+          line->ls = conn;
+          line->conn.amlc = namlc;
+          line->conn.ln = nline;
+          line->conn.outbinary = 1;
+        }
+        else
+        {
+          printf("amlc %03o line %d in use\n", ctrl, ln);
+          close(fd);
         }
         pthread_mutex_unlock(&amlc->pthread.mutex);
+
+        struct sockaddr_in sockaddr = {.sin_family = AF_INET, .sin_port = htons(port), .sin_addr.s_addr = host};
+        if(connect(fd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)))
+        {
+          printf("amlc %03o line %d connect %s:%s failed: %s\n", ctrl, ln, ahost, aport, strerror(errno));
+
+          pthread_mutex_lock(&amlc->pthread.mutex);
+          line->ls = offl;
+          line->fds = line->fdr = -1;
+          line->conn.amlc = line->conn.ln = line->conn.outbinary = 0;
+          pthread_mutex_unlock(&amlc->pthread.mutex);
+
+          close(fd);
+          break;
+        }
+
+        if(aamlc && aline)
+          printf("amlc %03o line %d connecting to %s:%s amlc %03o line %d\n", ctrl, ln, ahost, aport, namlc, nline);
+        else
+          printf("amlc %03o line %d connecting to %s:%s\n", ctrl, ln, ahost, aport);
+
       }
       break;
     default:

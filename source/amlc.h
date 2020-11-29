@@ -31,7 +31,10 @@
 #ifndef _amlc_h
 #define _amlc_h
 
+#define AMLC_MAXDEV 8
 #define AMLC_LINES 16
+#define AMLC_DFLTPORT 2323
+#define AMLC_BACKLOG 5
 
 #define AMLC_TX_VAL  0x8000
 #define AMLC_TX_SPC  0x4000
@@ -58,6 +61,10 @@ typedef struct {
 #define AMLC_CF_PDIS 0x0008
 #define AMLC_CF_PAR  0x0004
 #define AMLC_CF_CLEN 0x0003
+#define AMLC_CF_CL5  0x0000
+#define AMLC_CF_CL6  0x0002
+#define AMLC_CF_CL7  0x0001
+#define AMLC_CF_CL8  0x0003
   uint16_t cn; // Control
 #define AMLC_CN_TIME 0x0020
 #define AMLC_CN_XMIT 0x0008
@@ -70,16 +77,20 @@ typedef struct {
 #define AMLC_DS_DSC2 0x0002   // DTR
 #define AMLC_DS_DSC1 0x0001   // RTS
   int fds, fdr;
-  enum { offl = 0, pend, onln, loop, conn } ls;
+  enum { offl = 0, conn, onln, loop } ls;
   struct {
     int amlc; // amlc device number to connect to
     int ln;   // line number to connect to
+    int inbinary;
+    int outbinary;
   } conn;
 #ifdef LIBTELNET
   telnet_t *telnet;
   void **tnparm;
 #endif
 } line_t;
+
+static const uint8_t amlc_cl_mask[4] = { 0b00011111, 0b01111111, 0b00111111, 0b11111111 };
 
 typedef struct amlc_t {
   cpu_t *cpu;

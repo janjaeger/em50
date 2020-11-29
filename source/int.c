@@ -176,8 +176,8 @@ uint32_t ea = E50X(ea)(cpu, op);
 #if defined S_MODE || defined R_MODE
   if(cpu->crs->km.dp)
   {
-  uint32_t s = (int32_t)E50X(vfetch_d)(cpu, ea);
-  uint32_t l = (int32_t)G_L(cpu);
+  uint32_t s = E50X(vfetch_d)(cpu, ea);
+  uint32_t l = G_L(cpu);
   int32_t r;
   int eq, lt, car, ovf;
 
@@ -398,8 +398,8 @@ uint32_t ea = E50X(ea)(cpu, op);
 #if defined S_MODE || defined R_MODE
   if(cpu->crs->km.dp)
   {
-  uint32_t s = (int32_t)E50X(vfetch_d)(cpu, ea);
-  uint32_t l = (int32_t)G_L(cpu);
+  uint32_t s = E50X(vfetch_d)(cpu, ea);
+  uint32_t l = G_L(cpu);
   uint32_t r;
   int eq, lt, car, ovf;
 
@@ -563,7 +563,7 @@ int16_t v = (int16_t)E50X(vfetch_w)(cpu, ea);
 
   logopxoo(op, "mpy", ea, v & 0xffff);
 
-  int32_t l = (int32_t)a * v;
+  int32_t l = a * v;
 
 #if defined S_MODE || defined R_MODE
   if((uint16_t)a == 0x8000 && (uint16_t)v == 0x8000)
@@ -574,7 +574,14 @@ int16_t v = (int16_t)E50X(vfetch_w)(cpu, ea);
     return;
   }
 
-  l = from31(l); // TODO CHECK OVERFLOW
+  if((((uint32_t)l & 0x80000000) ^ (((uint32_t)l & 0x40000000) << 1)))
+  {
+    cpu->crs->km.cbit = 1;
+    E50X(int_ovf)(cpu);
+    return;
+  }
+
+  l = fr31(l); // TODO CHECK OVERFLOW
 #endif
 
   S_L(cpu, l);
@@ -696,7 +703,7 @@ uint16_t s = 0;
       ++s;
     }
 
-  l = from31(r);
+  l = fr31(r);
 
   S_L(cpu, l);
   S_VSC(cpu, s);
@@ -820,7 +827,7 @@ E50I(d)
 {
 int dr = op_dr(op) & 0b110;
 uint32_t r0 = G_R(cpu, dr);
-uint32_t r1 = G_R(cpu, (dr + 1) & 7);
+uint32_t r1 = G_R(cpu, dr + 1);
 int64_t d = (uint64_t)r0 << 32 | r1;
 int32_t v = E50X(efetch_d)(cpu, op);
 
@@ -837,7 +844,7 @@ int32_t v = E50X(efetch_d)(cpu, op);
   int32_t r = d % v;
 
   S_R(cpu, dr, q);
-  S_R(cpu, (dr + 1) & 7, r);
+  S_R(cpu, dr + 1, r);
 
   if(q < -2147483648 || q > 2147483647)
   {
@@ -1149,7 +1156,7 @@ int eq, lt;
 #ifdef I_MODE
 E50I(m)
 {
-int dr = op_dr(op); //  & 0b110;
+int dr = op_dr(op) & 0b110;
 int32_t r = G_R(cpu, dr);
 int32_t v = E50X(efetch_d)(cpu, op);
 
@@ -1158,7 +1165,7 @@ int32_t v = E50X(efetch_d)(cpu, op);
   int64_t d = (int64_t)r * v;
 
   S_R(cpu, dr, d >> 32);
-  S_R(cpu, (dr + 1) & 7, d & 0xffffffff);
+  S_R(cpu, dr + 1, d & 0xffffffff);
 
   cpu->crs->km.cbit = 0;
 }
@@ -1186,12 +1193,12 @@ int16_t v = E50X(efetch_w)(cpu, op);
 #ifdef I_MODE
 E50I(pid)
 {
-int dr = op_dr(op);
+int dr = op_dr(op) & 0b110;
 uint32_t r = G_R(cpu, dr);
 
   logop1(op, "pid");
 
-  S_R(cpu, (dr + 1) & 7, r);
+  S_R(cpu, dr + 1, r);
 
   if((r & 0x80000000))
     r |= 0x7fffffff;
@@ -1221,9 +1228,9 @@ int16_t h = G_RH(cpu, dr);
 #ifdef I_MODE
 E50I(pim)
 {
-int dr = op_dr(op);
+int dr = op_dr(op) & 0b110;
 int32_t r = G_R(cpu, dr);
-int32_t r1 = G_R(cpu, (dr + 1) & 7);
+int32_t r1 = G_R(cpu, dr + 1);
 
   logop1(op, "pim");
 

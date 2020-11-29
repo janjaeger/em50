@@ -43,7 +43,7 @@ E50I(rmc)
 
   cpu->crs->km.mcm = km_mcn;
 
-  longjmp(cpu->endop, endop_nointr5); // FIXME nointr1
+  longjmp(cpu->endop, endop_nointr1);
 }
 
 
@@ -64,6 +64,8 @@ E50I(lmcm)
   E50X(rxm_check)(cpu);
 
   cpu->crs->km.mcm = km_mcn;
+
+  longjmp(cpu->endop, endop_nointr1);
 }
 
 

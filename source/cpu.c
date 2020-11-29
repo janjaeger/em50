@@ -100,7 +100,35 @@ __sync_synchronize();
     S_RB(cpu, intraseg_i(irc, 1));
   }
 
-  longjmp(cpu->endop, endop_nointr5); // FIXME TODO CHECK
+  longjmp(cpu->endop, endop_inhibit); // FIXME TODO CHECK
+}
+
+
+static inline void __attribute__ ((noreturn)) E50X(run_cpu_check)(cpu_t *cpu)
+{
+ATOFF(cpu);
+
+  cpu->srf.mrf.dswrma  = cpu->fault.faddr;
+  cpu->srf.mrf.pswpb   = cpu->fault.pc;
+  cpu->srf.mrf.pswkeys = cpu->fault.km;
+
+  cpu->srf.mrf.chkreg  = cpu->fault.fcode;
+
+  if(cpu->crs->km.pxm)
+    pxm_check(cpu);
+  else
+  {
+    uint16_t ea = E50X(vfetch_w)(cpu, cpu->fault.offset);
+    if(!ea)
+      longjmp(cpu->smode, smode_halt);
+    S_RB(cpu, ea + 1);
+    E50X(vstore_wx)(cpu, ea, cpu->fault.pc & 0xffff, acc_wr);
+
+logall("-> %s fault offset %2.2x vector %2.2x/%2.2x pc %8.8x keys %4.4x fcodeh %4.4x faddr %8.8x pb %8.8x\n",
+  fault_name(cpu->fault.vecoff), cpu->fault.offset, cpu->fault.vector,cpu->fault.vecoff, cpu->fault.pc, cpu->fault.km.keys, cpu->fault.fcode, cpu->fault.faddr, cpu->pb);
+
+    longjmp(cpu->endop, endop_inhibit); // FIXME TODO CHECK
+  }
 }
 
 
@@ -108,11 +136,11 @@ static inline void __attribute__ ((noreturn)) E50X(run_cpu_fault)(cpu_t *cpu)
 {
 ATOFF(cpu);
 
-    cpu->crs->fcodeh     = cpu->fault.fcode;
-    cpu->crs->faddr      = cpu->fault.faddr;
-    cpu->srf.mrf.dswrma  = cpu->fault.faddr; // DSW ONLY SET FOR MISSING MEMORY AND MACHINE CHECK?
-    cpu->srf.mrf.pswpb   = cpu->fault.pc;
-    cpu->srf.mrf.pswkeys = cpu->fault.km;
+  cpu->crs->fcodeh     = cpu->fault.fcode;
+  cpu->crs->faddr      = cpu->fault.faddr;
+  cpu->srf.mrf.dswrma  = cpu->fault.faddr; // DSW ONLY SET FOR MISSING MEMORY AND MACHINE CHECK?
+  cpu->srf.mrf.pswpb   = cpu->fault.pc;
+  cpu->srf.mrf.pswkeys = cpu->fault.km;
 
   if(cpu->crs->km.pxm)
     pxm_fault(cpu);
@@ -127,17 +155,17 @@ ATOFF(cpu);
 logall("-> %s fault offset %2.2x vector %2.2x/%2.2x pc %8.8x keys %4.4x fcodeh %4.4x faddr %8.8x pb %8.8x\n",
   fault_name(cpu->fault.vecoff), cpu->fault.offset, cpu->fault.vector,cpu->fault.vecoff, cpu->fault.pc, cpu->fault.km.keys, cpu->fault.fcode, cpu->fault.faddr, cpu->pb);
 
-    longjmp(cpu->endop, endop_nointr5); // FIXME TODO CHECK
+    longjmp(cpu->endop, endop_inhibit); // FIXME TODO CHECK
   }
 }
 
 
 static inline void E50X(exec_inst)(cpu_t *cpu)
 {
-      cpu->exec = 0;
-      cpu->inst = E50X(vfetch_i)(cpu);
-      E50X(decode)(cpu, cpu->op);
-      logopr(cpu);
+  cpu->exec = 0;
+  cpu->inst = E50X(vfetch_i)(cpu);
+  E50X(decode)(cpu, cpu->op);
+  logopr(cpu);
 }
 
 
@@ -146,26 +174,30 @@ void E50X(run_cpu)(cpu_t *cpu)
   do {
     endop_t code = setjmp(cpu->endop);
     cpu->exec = 0;
+//  int dly = 0;
     do {
       if(!cpu_started(cpu))
         code = E50X(run_cpu_status)(cpu, code);
       switch(code)
       {
+      case endop_check:
+        E50X(run_cpu_check)(cpu);
       case endop_fault:
         E50X(run_cpu_fault)(cpu);
-      default:
-      case endop_nointr5:
-        E50X(exec_inst)(cpu);
-        E50X(exec_inst)(cpu);
-        E50X(exec_inst)(cpu);
-        E50X(exec_inst)(cpu);
       case endop_nointr1:
+      case endop_setjmp:
+//    dly = 0;
+      case endop_run:
         E50X(exec_inst)(cpu);
       case endop_intrchk:
-//      E50X(timer_get)(cpu); // ABORT CHECK
-        if(io_pending(cpu) && cpu->crs->km.ie)
-          E50X(run_cpu_intrchk)(cpu);
-      case endop_setjmp:
+        if(cpu->crs->km.ie)
+        {
+//        if(cpu->crs->km.pxm && (!((dly++) & 0xff)))
+//          E50X(timer_get)(cpu);
+          if(io_pending(cpu))
+            E50X(run_cpu_intrchk)(cpu);
+        }
+      case endop_inhibit:
         for(int n = 0; n < 32; ++n)
           E50X(exec_inst)(cpu);
       }

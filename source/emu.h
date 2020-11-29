@@ -105,10 +105,11 @@ typedef struct sys_t {
 typedef enum {
   endop_setjmp = 0,
   endop_run    = 1,
+  endop_check,
   endop_fault,
   endop_intrchk,
   endop_nointr1,
-  endop_nointr5
+  endop_inhibit
 } endop_t;
 
 
@@ -171,12 +172,14 @@ typedef struct cpu_t {
     uint8_t op[6];
   };
   struct {
-    uint32_t v[CACHE_SIZE];
+    uint32_t e[CACHE_SIZE];
     uint32_t r[CACHE_SIZE];
     uint32_t s[CACHE_SIZE];
+    int v[CACHE_SIZE];
   } tlb;
   struct {
-    int32_t i[IOTLB_SIZE];
+    uint32_t i[IOTLB_SIZE];
+    int v[IOTLB_SIZE];
   } iotlb;
   struct {
     pthread_mutex_t mutex;
@@ -208,23 +211,18 @@ typedef struct cpu_t {
   struct {
     pthread_mutex_t mutex;
     pthread_cond_t cond;
-  } wait;
-  struct {
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
     volatile enum { stopped = 0, stepping = 1, started = 2 } status;
   } halt;
 } cpu_t;
 
 static inline void mm_piotlb(cpu_t *cpu)
 {
-  memset(cpu->iotlb.i, 0xff, sizeof(cpu->iotlb.i));
+  memset(cpu->iotlb.v, 0, sizeof(cpu->iotlb.v));
 }
 
 static inline void mm_ptlb(cpu_t *cpu)
 {
-  memset(cpu->tlb.v, 0xff, sizeof(cpu->tlb.v));
-  mm_piotlb(cpu);
+  memset(cpu->tlb.v, 0, sizeof(cpu->tlb.v));
 }
 
 static inline uint32_t em50_timer(void)
@@ -239,29 +237,10 @@ static inline uint32_t em50_timer(void)
 void missing_mem(cpu_t *cpu, uint32_t addr);
 static inline void *physad(cpu_t *cpu, uint32_t addr)
 {
+//addr &= 0x07ffffff;
   if(addr >= cpu->maxmem)
     missing_mem(cpu, addr);
   return cpu->sys->physstor + (addr << 1);
-}
-
-static inline void cpu_wait_init(cpu_t *cpu)
-{
-  pthread_cond_init(&cpu->wait.cond, NULL);
-  pthread_mutex_init(&cpu->wait.mutex, NULL);
-}
-
-static inline void cpu_wait(cpu_t *cpu)
-{
-  pthread_mutex_lock(&cpu->wait.mutex);
-  pthread_cond_wait(&cpu->wait.cond, &cpu->wait.mutex);
-  pthread_mutex_unlock(&cpu->wait.mutex);
-}
-
-static inline void cpu_post(cpu_t *cpu)
-{
-  pthread_mutex_lock(&cpu->wait.mutex);
-  pthread_cond_broadcast(&cpu->wait.cond);
-  pthread_mutex_unlock(&cpu->wait.mutex);
 }
 
 static inline void cpu_halt_init(cpu_t *cpu)

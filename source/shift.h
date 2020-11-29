@@ -177,22 +177,6 @@ int64_t v = *val;
   return o;
 }
 
-static inline int shift_left_arithmetic31(int32_t *val, int n)
-{
-int o;
-int64_t v = *val;
-
-  if(n > 63)
-    n = 63;
-
-  v <<= n;
-
-  o = ((*val == 0) || (n < 31 && ((v >> 30ULL) == 0 || (v >> 30ULL) == -1))) ? 0 : 1;
-
-  *val = v;
-
-  return o;
-}
 
 static inline int shift_left_arithmetic32(int32_t *val, int n)
 {

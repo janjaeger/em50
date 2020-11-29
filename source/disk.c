@@ -61,7 +61,17 @@ cpu_t *cpu = dk->cpu;
 
   dk->stat |= DK_STAT_OK;
 
+  int lpchk = 0;
+
   while(1) {
+
+    if(++lpchk > 1000)
+    {
+      lpchk = 0;
+      pthread_mutex_unlock(&dk->pthread.mutex);
+      usleep(210000ULL);
+      pthread_mutex_lock(&dk->pthread.mutex);
+    }
 
     dm_t *dm = (dk->mhd >= 0) ? &dk->dm[dk->mhd] : NULL;
 
@@ -88,6 +98,8 @@ logmsg("disk %03o:%d skip mask %02x stat %4.4x\n", dk->ctrl, dk->mhd, mask, dk->
         default:
           dk->oar += 2;
       }
+      if((mask & DK_MSEEK) && (dk->stat & DK_STAT_SEEKING) && dm && --dm->seeking < 0)
+        dk->stat &= ~DK_STAT_SEEKING;
     }
     else
       switch(opcde) {
@@ -140,6 +152,7 @@ logmsg("disk %03o:%d stat %4.4x\n", dk->ctrl, dk->mhd, dk->stat);
           else
           {
             dk->stat |= DK_STAT_SEEKING;
+            dm->seeking = 5;
             uint32_t seek = dm->seek = (order & 0x8000) ? 0 : order & 0x07ff;
             if(seek == 0x07ff || (!dm->formatting && !dk_off(dm, dm->size, 0, seek, 0)))
               dk->stat |= DK_STAT_SEEKERR;
@@ -282,6 +295,8 @@ logmsg("disk %03o:%d doar %4.4x\n", dk->ctrl, dk->mhd, dk->oar);
 
       case DK_DTRAN:
         dk->oar = order & 0xffff;
+        if((mask & DK_MSEEK) && (dk->stat & DK_STAT_SEEKING) && dm && --dm->seeking < 0)
+          dk->stat &= ~DK_STAT_SEEKING;
         break;
 
       default:
@@ -451,19 +466,19 @@ dk_t *dk = *devparm;
         pthread_mutex_lock(&dk->pthread.mutex);
         dk_close(&dk->dm[ext]);
 
-	if(strcmp(argv[0], "*"))
-	{
+        if(strcmp(argv[0], "*"))
+        {
           if(dk->dm[ext].fn)
             free(dk->dm[ext].fn);
           dk->dm[ext].fn =  strdup(argv[0]);
-	}
+        }
 
         if(argc > 1)
         {
           int sizecode;
-	  if(argc > 2)
+          if(argc > 2)
             sizecode = a2i(argv[2]);
-	  else
+          else
             sizecode = 0;
           dk_crnew(&dk->dm[ext], argv[1], sizecode);
         }

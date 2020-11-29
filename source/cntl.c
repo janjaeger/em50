@@ -82,6 +82,14 @@ static inline void cp_clkinit(cp_t *vcp)
   clock_gettime(CLOCK_MONOTONIC, &vcp->pthread.ts);
 }
 
+static inline void cp_nsleep(cp_t *vcp, uint64_t ns)
+{
+  vcp->pthread.ts.tv_nsec += ns;
+  vcp->pthread.ts.tv_sec  += vcp->pthread.ts.tv_nsec / 1000000000ULL;
+  vcp->pthread.ts.tv_nsec %= 1000000000ULL;
+  clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &vcp->pthread.ts, NULL);
+}
+
 static void *cp_thread(void *parm)
 {
 cpu_t *cpu = parm;
@@ -105,15 +113,14 @@ cp_t *vcp = cpu->vcp;
     if((vcp->cr & SOC_CR_PICR))
       nsec <<= 5; // 102.4 / 3.2
 
+    if(!(vcp->cr & SOC_CR_EPIC) || ((vcp->cr & SOC_CR_ELFC) && SOC_LFC_NSEC < nsec))
+      nsec = SOC_LFC_NSEC;
 #if 0
     if(cpu->sys->trace && cpu->sys->verbose)
       nsec *=1000;
 #endif
 
-    vcp->pthread.ts.tv_nsec += nsec;
-    vcp->pthread.ts.tv_sec  += vcp->pthread.ts.tv_nsec / 1000000000ULL;
-    vcp->pthread.ts.tv_nsec %= 1000000000ULL;
-    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &vcp->pthread.ts, NULL);
+    cp_nsleep(vcp, nsec);
 
     if((vcp->cr & SOC_CR_ACT) && (vcp->cr & SOC_CR_EMI))
     {
@@ -227,22 +234,24 @@ cp_t *vcp = *devparm;
         case 000: // Start LFC and Enable Memory Increment
           logmsg("soc %03o Start LFC and Enable Memory Increment\n", ctrl);
           io_clrint(cpu, &vcp->intr);
-          vcp->cr |= SOC_CR_EMI;
+          vcp->cr |= (SOC_CR_EMI|SOC_CR_ELFC);
           break;
         case 001: // Ackknowledge PIC interrupt
           logmsg("soc %03o Acknowledge PIC interrupt\n", ctrl);
           io_clrint(cpu, &vcp->intr);
           break;
-        case 002: // Stop LFC and Enable Memory Increment
-          logmsg("soc %03o Stop LFC and Enable Memory Increment\n", ctrl);
+        case 002: // Stop LFC and Disable Memory Increment
+          logmsg("soc %03o Stop LFC and Disable Memory Increment\n", ctrl);
           io_clrint(cpu, &vcp->intr);
-          vcp->cr |= SOC_CR_EMI;
+          vcp->cr &= ~(SOC_CR_EMI|SOC_CR_ELFC);
           break;
         case 004: // Select Line Freguancy for Memory Increment
           logmsg("soc %03o Select Line Freguancy for Memory Increment\n", ctrl);
+	  vcp->cr |= SOC_CR_ELFC;
           break;
         case 005: // Select External Clock for Memory Increment
           logmsg("soc %03o Select External Clock for Memory Increment\n", ctrl);
+	  vcp->cr |= SOC_CR_EPIC;
           break;
         case 006: // Trigger WDT
           logmsg("soc %03o Trigger WDT\n", ctrl);

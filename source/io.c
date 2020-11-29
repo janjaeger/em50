@@ -57,7 +57,7 @@
 
 static const ioop_t device[0100] = {
 /*000*/ NULL,                    /*      Not Assigned */
-/*001*/ NULL,                    /* 3000 Paper taoe reader */
+/*001*/ NULL,                    /* 3000 Paper tape reader */
 /*002*/ NULL,                    /* 3000 Paper tape punch*/
 /*003*/ NULL,                    /* 3100 URC 1 */
 /*004*/ sysc_io,                 /* 3000 System Console */
@@ -328,7 +328,7 @@ E50I(enbp)
 
   cpu->crs->km.ie = 1;
 
-  longjmp(cpu->endop, endop_nointr1); // FIXME unkown
+  longjmp(cpu->endop, endop_nointr1);
 }
 
 
@@ -378,7 +378,7 @@ int32_t c2r(cpu_t *cpu, uint32_t vaddr)
 
 void istore_w(cpu_t *cpu, uint32_t vaddr, uint16_t val)
 {
-int32_t raddr = i2r(cpu, vaddr);
+  int32_t raddr = i2r(cpu, vaddr);
 
   if(raddr >= 0)
     store_w(physad(cpu, raddr), val);
@@ -389,7 +389,14 @@ int32_t raddr = i2r(cpu, vaddr);
 
 void istore_d(cpu_t *cpu, uint32_t vaddr, uint32_t val)
 {
-int32_t raddr = i2r(cpu, vaddr);
+  if(page_cross_d(vaddr))
+  {
+      istore_w(cpu, vaddr, val >> 16);
+      istore_w(cpu, vaddr + 1, val);
+      return;
+  }
+
+  int32_t raddr = i2r(cpu, vaddr);
 
   if(raddr >= 0)
     store_d(physad(cpu, raddr), val);
@@ -400,7 +407,7 @@ int32_t raddr = i2r(cpu, vaddr);
 
 uint16_t ifetch_w(cpu_t *cpu, uint32_t vaddr)
 {
-int32_t raddr = i2r(cpu, vaddr);
+  int32_t raddr = i2r(cpu, vaddr);
 
   logmsg("ifetch_w %8.8x %8.8x %4.4x\n", vaddr, raddr, fetch_w(physad(cpu, vaddr)));
 
@@ -410,7 +417,12 @@ int32_t raddr = i2r(cpu, vaddr);
 
 uint32_t ifetch_d(cpu_t *cpu, uint32_t vaddr)
 {
-int32_t raddr = i2r(cpu, vaddr);
+  if(page_cross_d(vaddr))
+  {
+      return (ifetch_w(cpu, vaddr) << 16) | ifetch_w(cpu, vaddr + 1);
+  }
+
+  int32_t raddr = i2r(cpu, vaddr);
 
   logmsg("ifetch_d %8.8x %8.8x %8.8x\n", vaddr, raddr, fetch_w(physad(cpu, vaddr)));
 

@@ -54,7 +54,8 @@ typedef struct {
   struct dk_t *dk;
   char *fn;
   int fd;
-  int      formatting;
+  int formatting;
+  int seeking;
   uint32_t start;
   uint32_t heads;
   uint32_t tracks;

@@ -309,7 +309,7 @@ urs_t *reg = cpu->crs;
   printf("OWNER %o/%4.4x\n", reg->ownerh, reg->ownerl);
   printf("PPA   %4.4x:%4.4x\n", cpu->srf.mrf.ppa, cpu->srf.mrf.pcba);
   printf("PPB   %4.4x:%4.4x\n", cpu->srf.mrf.ppb, cpu->srf.mrf.pcbb);
-  printf("TIMER %9.8x\n", reg->timer + em50_timer());
+  printf("TIMER %9.8x\n", reg->timer + reg->km.pxm ? em50_timer() : 0);
   printf("A/B   %4.4x/%4.4x\n", G_A(cpu), G_B(cpu));
   printf("X/Y   %4.4x/%4.4x\n", G_X(cpu), G_Y(cpu));
   for(int far = 0; far < 2; ++far)

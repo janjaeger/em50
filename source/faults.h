@@ -255,6 +255,71 @@ static inline void __attribute__ ((noreturn)) E50X(pointer_fault)(cpu_t *cpu, ui
   longjmp(cpu->endop, endop_fault);
 }
 
+static inline void __attribute__ ((noreturn)) E50X(power_check)(cpu_t *cpu)
+{
+  cpu->fault.pc     = cpu->pb;
+  cpu->fault.ring   = cpu->pb & ea_r;
+  cpu->fault.faddr  = 0;
+  cpu->fault.vector = 0200;
+//cpu->fault.vecoff = 0;
+  cpu->fault.km     = cpu->crs->km;
+  cpu->fault.fcode  = 0;
+  cpu->fault.offset = 0070;
+  longjmp(cpu->endop, endop_check);
+}
+
+static inline void __attribute__ ((noreturn)) E50X(environment_check)(cpu_t *cpu, uint16_t code)
+{
+  cpu->fault.pc     = cpu->pb;
+  cpu->fault.ring   = cpu->pb & ea_r;
+  cpu->fault.faddr  = 0;
+  cpu->fault.vector = 0200;
+//cpu->fault.vecoff = 0;
+  cpu->fault.km     = cpu->crs->km;
+  cpu->fault.fcode  = code;
+  cpu->fault.offset = 070;
+  longjmp(cpu->endop, endop_check);
+}
+
+static inline void __attribute__ ((noreturn)) E50X(parity_check)(cpu_t *cpu, uint32_t addr)
+{
+  cpu->fault.pc     = cpu->po;
+  cpu->fault.ring   = cpu->po & ea_r;
+  cpu->fault.faddr  = addr;
+  cpu->fault.vector = 0270;
+//cpu->fault.vecoff = 0;
+  cpu->fault.km     = cpu->crs->km;
+  cpu->fault.fcode  = 0;
+  cpu->fault.offset = 071;
+  longjmp(cpu->endop, endop_check);
+}
+
+static inline void __attribute__ ((noreturn)) E50X(machine_check)(cpu_t *cpu, uint32_t addr)
+{
+  cpu->fault.pc     = cpu->po;
+  cpu->fault.ring   = cpu->po & ea_r;
+  cpu->fault.faddr  = addr;
+  cpu->fault.vector = 0300;
+//cpu->fault.vecoff = 0;
+  cpu->fault.km     = cpu->crs->km;
+  cpu->fault.fcode  = 0;
+  cpu->fault.offset = 071;
+  longjmp(cpu->endop, endop_check);
+}
+
+static inline void __attribute__ ((noreturn)) E50X(memory_check)(cpu_t *cpu, uint32_t addr)
+{
+  cpu->fault.pc     = cpu->po;
+  cpu->fault.ring   = cpu->po & ea_r;
+  cpu->fault.faddr  = addr;
+  cpu->fault.vector = 0310;
+//cpu->fault.vecoff = 0;
+  cpu->fault.km     = cpu->crs->km;
+  cpu->fault.fcode  = 0;
+  cpu->fault.offset = 077;
+  longjmp(cpu->endop, endop_check);
+}
+
 
 static inline void E50X(rxm_check)(cpu_t *cpu)
 {

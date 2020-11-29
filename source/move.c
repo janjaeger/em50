@@ -404,9 +404,9 @@ uint16_t s = E50X(vfetch_w)(cpu, ap);
 #ifdef I_MODE
 E50I(stcd)
 {
-int dr = op_dr(op);
+int dr = op_dr(op) & 0b110;
 uint32_t ap = E50X(vfetch_iap)(cpu, NULL);
-uint32_t r1 = G_R(cpu, (dr + 1) & 7);
+uint32_t r1 = G_R(cpu, dr + 1);
 uint32_t s = E50X(vfetch_d)(cpu, ap);
 
   logop1o(op, "stcd", ap);

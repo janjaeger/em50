@@ -36,7 +36,7 @@
 
 #include "shift.h"
 
-#include "int.h" // to/from31
+#include "int.h" // to/fr31
 
 
 /* ARL n
@@ -124,14 +124,14 @@ int o;
   logop1oo(op, "lrs", l, n);
 
 #if defined S_MODE || defined R_MODE
-uint32_t b1 = l & 0x00008000;
+  uint32_t b1 = l & 0x00008000;
   l = to31(l);
 #endif
 
   o = shift_right_arithmetic32(&l, n);
 
 #if defined S_MODE || defined R_MODE
-  l = from31(l);
+  l = fr31(l);
   l |= b1;
 #endif
 
@@ -179,15 +179,15 @@ int32_t l = G_L(cpu);
   logop1o(op, "lls", n);
 
 #if defined S_MODE || defined R_MODE
-uint32_t b1 = l & 0x00008000;
-  l = to31(l);
+  uint32_t b1 = l & 0x00008000;
+  l = to31h(l);
+#endif
 
-  int ovf = shift_left_arithmetic31(&l, n);
-
-  l = from31(l);
-  l |= b1;
-#else
   int ovf = shift_left_arithmetic32(&l, n);
+
+#if defined S_MODE || defined R_MODE
+  l = fr31h(l);
+  l |= b1;
 #endif
 
   S_L(cpu, l);

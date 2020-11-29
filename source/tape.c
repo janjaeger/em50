@@ -37,7 +37,7 @@
 #endif
 
 
-#if 1
+#if 0
 #undef logmsg
 #define logmsg(...) logall(__VA_ARGS__)
 #endif

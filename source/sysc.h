@@ -55,6 +55,8 @@ typedef struct sc_t {
   int echo;
   int kb[2];
   int pr[2];
+  bool eplxout;
+  bool eplxin;
 } sc_t;
 
 int sysc_io(cpu_t *cpu, int, int, int, int, void **, int, char *[]);

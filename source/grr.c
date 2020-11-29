@@ -34,23 +34,21 @@
 
 #include "opcode.h"
 
+#include "int.h"
+
 
 #ifdef I_MODE
 
 E50I(lip)
 {
-int dr = op_dr(op);
-
-  logop2o(op, "*lip", dr);
-
-#if 0
-  uint32_t r = E50X(efetch_d)(cpu, op);
-
-  if((r & 0x80000000))
-    E50X(pointer_fault)(cpu, r >> 16, r);
-#else
+  int dr = op_dr(op);
   uint32_t ea = E50X(ea)(cpu, op);
 
+  logop2oo(op, "*lip", dr, ea);
+
+#if 0
+  uint32_t r = E50X(vfetch_il)(cpu, ea);
+#else
   uint32_t r = E50X(vfetch_d)(cpu, ea);
 
   if((r & 0x80000000))
@@ -63,25 +61,28 @@ int dr = op_dr(op);
 
 E50I(aip)
 {
-int dr = op_dr(op);
-
-  logop2o(op, "*aip", dr);
-
-#if 0
-  uint32_t r = E50X(efetch_d)(cpu, op);
-
-  if((r & 0x80000000))
-    E50X(pointer_fault)(cpu, r >> 16, r);
-#else
+  int dr = op_dr(op);
   uint32_t ea = E50X(ea)(cpu, op);
 
-  uint32_t r = E50X(vfetch_d)(cpu, ea);
+  logop2oo(op, "*aip", dr, ea);
 
-  if((r & 0x80000000))
-    E50X(pointer_fault)(cpu, r >> 16, ea);
-#endif
+  uint32_t r = G_R(cpu, dr) & (ea_s|ea_w);
+  uint32_t s = E50X(vfetch_il)(cpu, ea);
 
-  S_R(cpu, dr, G_R(cpu, dr) + r);
+  int eq, lt, car, ovf;
+
+  r = add_d(s, r, &eq, &lt, &car, &ovf);
+
+  cpu->crs->km.eq = eq;
+  cpu->crs->km.lt = lt;
+  cpu->crs->km.link = car;
+  cpu->crs->km.cbit = ovf;
+
+  S_R(cpu, dr, r);
+
+  if(ovf)
+    E50X(int_ovf)(cpu);
+
 }
 
 

@@ -171,8 +171,7 @@ uint16_t dis = op_d(op);
     break;
 
   default:
-    logmsg("abort1\n");
-    abort();
+abort();
   }
 
   return dis & 0x7fff;
@@ -235,8 +234,7 @@ uint16_t dis;
     break;
 
   default:
-    logmsg("abort1\n");
-    abort();
+abort();
   }
 
   return dis;
@@ -337,8 +335,7 @@ int cb = op_cb(op);
     return E50X(vfetch_is)(cpu, di + sp) + G_X(cpu); // I(D+SP)+X
 
   default:
-    logmsg("abort2\n");
-    abort();
+abort();
   }
 }
 
@@ -420,8 +417,7 @@ int16_t off;
     return AB(cpu, PB, E50X(vfetch_is)(cpu, AB(cpu, PB, (cpu->exec ? cpu->ep : cpu->p) + off)) + G_X(cpu)); // I(P + D) + X;
 
   default:
-    logmsg("abort1\n");
-    abort();
+abort();
   }
 }
 
@@ -490,8 +486,7 @@ if(op_b(op) /* && G_ZB(cpu, op_b(op)) */ ) logmsg("\n\n*** BASE(%s) %8.8x ***\n\
     return intraseg_i(E50X(vfetch_il)(cpu, AX(cpu, op_b(op), di)), G_X(cpu));
 
   default:
-    logmsg("abort2\n");
-    abort();
+abort();
   }
 }
 
@@ -553,18 +548,18 @@ logmsg("\nx_ea tm %d br %d sr %d\n", tm, br, sr);
     case 0:
       switch(br) {
         case 0: // Register to Register
-          ;  // handled in efetch/estore
+abort()   ;  // handled in efetch/estore
           break;
         case 1: 
           if(sr == 0) // Immediate type 1
-            ;  // handled in efetch/estore
+abort()     ;  // handled in efetch/estore
           else        // Immediate type 2
-            ;  // handled in efetch/estore
+abort()     ;  // handled in efetch/estore
           break;
         case 2:
           switch(sr) {
             case 0: // Immediate type 3
-              ;  // handled in efetch/estore
+abort()       ;  // handled in efetch/estore
               break;
             case 1: // Floating register source (FR0)
 logall("ea todo 1: tm %d br %d, sr %d\n", tm, br, sr);

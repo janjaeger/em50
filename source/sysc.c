@@ -262,9 +262,13 @@ sc_t *sc = *devparm;
   switch(type) {
     case IO_TYPE_OCP:
       switch(func) {
-//      case 000: // Initialize Echoplex Input
+        case 000: // Initialize Echoplex Input
+          logmsg("sysc %03o Initialize Echoplex Input\n", sc->ctrl);
+          sc->eplxin = true;
+          break;
         case 001: // Initialize Echoplex Output
           logmsg("sysc %03o Initialize Echoplex Output\n", sc->ctrl);
+          sc->eplxout = true;
           break;
 //      case 002: // Set Receive Interrupt Mask
 //      case 003: // Enable Receive DMA/C
@@ -308,15 +312,21 @@ sc_t *sc = *devparm;
       break;
     case IO_TYPE_SKS:
       switch(func) {
-//      case 000: // Skip If Ready
+        case 000: // Skip If Ready
+          logmsg("sysc %03o Skip If Ready\n", sc->ctrl);
+          break;
         case 001: // Skip If Not Busy
           logmsg("sysc %03o Skip If Not Busy\n", sc->ctrl);
           break;
-//      case 002: // Skip If Receiver not Interrupting
+        case 002: // Skip If Receiver not Interrupting
+          logmsg("sysc %03o Skip If Receiver not Interrupting\n", sc->ctrl);
+	  if(sysc_poll(sc))
+            return 0;
+          break;
 //      case 003: // Skip If Control Registers Valid
         case 004: // Skip If Neither Receiver nor Transmitter Interrupting
           logmsg("sysc %03o Skip If Neither Receiver nor Transmitter Interrupting\n", sc->ctrl);
-	  if(sysc_poll(sc))
+	  if(sc->eplxout || sysc_poll(sc))
             return 0;
           break;
 //      case 005: // Skip If Transmitter not Interrupting
@@ -372,9 +382,18 @@ sc_t *sc = *devparm;
         case 011: // Input ID
           S_A(cpu, sc->id);
           break;
-//      case 014: // Input Receive DMA/C channel address
-//      case 015: // Input Transmit DMA/C channel address
-//      case 016: // Input Receive Vector
+        case 014: // Input Receive DMA/C channel address
+          S_A(cpu, sc->rc);
+          logmsg("sysc %03o Input Receive DMA/C Channel Address %4.4x\n", sc->ctrl, sc->rc);
+          break;
+        case 015: // Input Transmit DMA/C channel address
+          logmsg("sysc %03o Input Transmit DMA/C Channel Address %4.4x\n", sc->ctrl, sc->tc);
+          S_A(cpu, sc->tc);
+          break;
+        case 016: // Input Receive Vector
+          S_A(cpu, sc->rv);
+            logmsg("sysc %03o Input Receive Vector %4.4x\n", sc->ctrl, sc->rv);
+          break;
         case 017: // Input Transmit Vector / Input BClock 
           if(sysc_bclock_isfetch(cpu))
           {
@@ -418,11 +437,17 @@ sc_t *sc = *devparm;
         case 013: // Set Clock
           logmsg("sysc %03o Set Clock %04x\n", sc->ctrl, G_A(cpu));
           break;
-//      case 014: // Output Receive DMA/C Channel Address
-//      case 015: // Output Transmit DMA/C Channel Address
+        case 014: // Output Receive DMA/C Channel Address
+          sc->rc = G_A(cpu);
+          logmsg("sysc %03o Output Receive DMA/C Channel Address %4.4x\n", sc->ctrl, sc->rc);
+          break;
+        case 015: // Output Transmit DMA/C Channel Address
+          sc->tc = G_A(cpu);
+          logmsg("sysc %03o Output Transmit DMA/C Channel Address %4.4x\n", sc->ctrl, sc->tc);
+          break;
         case 016: // Output Receive Interrupt Vector
           sc->rv = G_A(cpu);
-          logmsg("sysc %03o Output Receive Interrupt Vector %4.4x\n", sc->ctrl, sc->t2);
+          logmsg("sysc %03o Output Receive Interrupt Vector %4.4x\n", sc->ctrl, sc->rv);
           break;
         case 017: // Output Transmit Interrupt Vector
           if(G_A(cpu) == 0)

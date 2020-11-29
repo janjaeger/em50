@@ -53,11 +53,11 @@ typedef enum {
   acc_wr = 0,
   acc_rd = 1,
   acc_ex = 3,
-  acc_rx = 4,
-  acc_wx = 5,
+  acc_wx = 4,
+  acc_rx = 5,
   acc_gt = 6,
-  acc_nn = 7,
-  acc_io = 8
+  acc_io = 7,
+  acc_nn = 8
 } acc_t;
 
 
@@ -115,14 +115,11 @@ static inline void mm_itlb(cpu_t *cpu, uint32_t vaddr)
 {
   uint32_t x = CACHE_INDEX(vaddr, acc_nn);
 
-  cpu->tlb.v[x^0] = 0xffffffff;
-  cpu->tlb.v[x^1] = 0xffffffff;
+  cpu->tlb.v[x^0] = 0;
+  cpu->tlb.v[x^1] = 0;
 
-  if(vaddr < (IOTLB_SIZE << em50_page_shift))
-  {
-    uint32_t i = IOTLB_INDEX(vaddr);
-    cpu->iotlb.i[i] = 0xffffffff;
-  }
+  if(io_seg(vaddr))
+    cpu->iotlb.v[IOTLB_INDEX(vaddr)] = 0;
 }
 
 
@@ -376,11 +373,12 @@ static inline uint32_t E50X(fetch_sdw)(cpu_t *cpu, uint32_t vaddr, void (*sfault
   if(s >= G_DTAR_L(cpu, d))
   {
 logall("FAULT dtar %8.8x len %x addr %8.8x ie %d\n", G_DTAR_L(cpu, d), G_DTAR_A(cpu, d), vaddr, cpu->crs->km.ie);
-    sfault(cpu, segment_fault_dtar, vaddr);
+    if(sfault)
+      sfault(cpu, segment_fault_dtar, vaddr);
     return sdw_f;
   }
 
-  dbgmsg("\naddr(%8.8x) dtar(%d) seg(%03x) page(%02x) offset(%03x)\n", vaddr, d, s, p, o);
+  dbgmsg("\naddr(%8.8x) dtar(%d) seg(%03x)\n", vaddr, d, s);
 
   dbgmsg("dtar(%d) %8.8x len(%03x) page(%08x)\n", d, G_DTAR(cpu, d), G_DTAR_L(cpu, d), G_DTAR_A(cpu, d));
 
@@ -394,7 +392,8 @@ logall("FAULT dtar %8.8x len %x addr %8.8x ie %d\n", G_DTAR_L(cpu, d), G_DTAR_A(
   if((sdw & sdw_f))
   {
 logall("FAULT raddr %8.8x sdw %8.8x vaddr %8.8x ie %d\n", sdt, sdw, vaddr, cpu->crs->km.ie);
-    sfault(cpu, segment_fault_sdw, vaddr);
+    if(sfault)
+      sfault(cpu, segment_fault_sdw, vaddr);
   }
 
   return sdw;
@@ -452,7 +451,7 @@ static inline int32_t E50X(xlatv2r)(cpu_t *cpu, uint32_t sdw, uint32_t vaddr, ac
   uint32_t o = ea_off(vaddr);
   uint32_t h = sdw_a(sdw);
 
-  dbgmsg("sdt(%8.8x) %8.8x sdw(%8.8x)\n", sdt, rfetch_d(cpu, sdt), h);
+  dbgmsg("sdw(%8.8x) %8.8x\n", sdw, h);
 
   dbgmsg("hmap(%4.4x) pmt(%8.8x)\n", rfetch_w(cpu, h + p), rfetch_d(cpu, h + (p << 1)));
 
@@ -515,24 +514,14 @@ logall("FAULT raddr %8.8x hmap %4.4x vaddr %8.8x ie %d\n", h + p, hmap, vaddr, c
 
 static inline uint32_t E50X(v2rx)(cpu_t *cpu, uint32_t vaddr, acc_t acc)
 {
-//if((vaddr & 0x0ffffffe) == 0xc0207ec)
-//{
-//	printf("ZZZ %4.4x\n", cpu->crs->ownerl);
-//	logall("ZZZ %4.4x\n", cpu->crs->ownerl);
-//}
-
   vaddr |= cpu->pb & ea_r;
 
   uint32_t x = CACHE_INDEX(vaddr, acc);
 
-  if(acc != acc_io)
+  if(cpu->tlb.v[x] && cpu->tlb.e[x] == ea_pgad(vaddr))
   {
-dbgmsg("v %8.8x r %8.8x i %d a %8.8x\n", cpu->tlb.v[x], cpu->tlb.r[x], x, vaddr);
-    if(cpu->tlb.v[x] == (vaddr & ~0x3ff))
-    {
-      E50X(acc_check)(cpu, cpu->tlb.s[x], vaddr, acc);
-      return cpu->tlb.r[x] | (vaddr & 0x3ff);
-    }
+    E50X(acc_check)(cpu, cpu->tlb.s[x], vaddr, acc);
+    return cpu->tlb.r[x] | (vaddr & em50_page_offm);
   }
 
   uint32_t sdw = E50X(fetch_sdw)(cpu, vaddr, E50X(segment_fault));
@@ -540,13 +529,19 @@ dbgmsg("v %8.8x r %8.8x i %d a %8.8x\n", cpu->tlb.v[x], cpu->tlb.r[x], x, vaddr)
 
   uint32_t r = E50X(xlatv2r)(cpu, sdw, vaddr, acc, E50X(page_fault));
 
-  dbgmsg("\n-> v %8.8x -> r %8.8x\n", vaddr, r);
-
   if(acc != acc_io)
   {
-    cpu->tlb.v[x] = vaddr & ~0x3ff;
-    cpu->tlb.r[x] = r & ~0x3ff;
-    cpu->tlb.s[x] = sdw;
+    cpu->tlb.e[x & ~1] = cpu->tlb.e[x] = ea_pgad(vaddr);
+    cpu->tlb.r[x & ~1] = cpu->tlb.r[x] = r & em50_page_mask;
+    cpu->tlb.s[x & ~1] = cpu->tlb.s[x] = sdw;
+    cpu->tlb.v[x & ~1] = cpu->tlb.v[x] = 1;
+  }
+
+  if(io_seg(vaddr))
+  {
+    int i = IOTLB_INDEX(vaddr);
+    cpu->iotlb.i[i] = r & em50_page_mask;
+    cpu->iotlb.v[i] = 1;
   }
 
   return r;
@@ -572,26 +567,20 @@ if((vaddr & ea_f)) PRINTF("bug2\n");
 #if defined(HMDE)
 static inline int32_t i2r(cpu_t *cpu, uint32_t vaddr)
 {
+int i = IOTLB_INDEX(vaddr);
+
   if(!cpu->crs->km.mio)
     return vaddr & 0x0fffffff;
 
-  int32_t r = cpu->iotlb.i[IOTLB_INDEX(vaddr)] | (vaddr & em50_page_offm);
-logmsg("i2r [%d] %8.8x %8.8x\n", IOTLB_INDEX(vaddr), vaddr, r);
-  if(r >= 0)
-    return r;
-  else
-  {
-    uint32_t sdw = E50X(fetch_sdw)(cpu, vaddr, NULL);
-    if((sdw & sdw_f))
-      return -1;
-    r = E50X(xlatv2r)(cpu, sdw, vaddr, acc_io, NULL);
-logmsg("i2r > %8.8x\n", r);
-    if(r >= 0)
-    {
-      cpu->iotlb.i[IOTLB_INDEX(vaddr)] = r & em50_page_mask;
-      return r;
-    }
-  }
+  if(io_seg(vaddr) && cpu->iotlb.v[i])
+    return cpu->iotlb.i[i] | ea_off(vaddr);
+
+#if 0
+  uint32_t sdw = E50X(fetch_sdw)(cpu, vaddr, NULL);
+  if((sdw & sdw_f))
+    return -1;
+  return E50X(xlatv2r)(cpu, sdw, vaddr, acc_nn, NULL);
+#endif
 
   return -1;
 }

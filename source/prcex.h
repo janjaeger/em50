@@ -50,28 +50,29 @@
 
 static inline int loc2crn(cpu_t *cpu, uint16_t loc)
 {
-  return (((loc-0x40) >> 5) & (em50_nrf -1));
+  return (((loc-0x40) >> 5) & (em50_nrf - 1));
 }
 
 static inline void set_crs(cpu_t *cpu, int nrs)
 {
   uint32_t timer = em50_timer();
 
+  if(cpu->crs->km.pxm && !cpu->crs->km.in)
+    cpu->crs->timer += timer;
+
   uint16_t modals = cpu->crs->km.modals;
 
-  cpu->crs->timer += timer;
-
+  S_P(cpu, cpu->pb);
   cpu->crn = (nrs & (em50_nrf - 1));
-
-  cpu->crs->pb = cpu->pb;
   cpu->crs = &cpu->srf.urs[cpu->crn];
-  cpu->pb = cpu->crs->pb;
-
-  cpu->crs->timer -= timer;
+  S_RB(cpu, cpu->crs->pb);
 
   cpu->crs->km.modals = modals;
 
   cpu->crs->km.crs = cpu->crn;
+
+  if(cpu->crs->km.pxm && !cpu->crs->km.in)
+    cpu->crs->timer -= timer;
 
   mm_ptlb(cpu);
 }
@@ -81,72 +82,109 @@ static inline void set_crs(cpu_t *cpu, int nrs)
 
 static inline uint16_t E50X(vfetch_wp)(cpu_t *cpu, uint32_t addr)
 {
-  return E50X(vfetch_wx)(cpu, addr, acc_nn);
+  return E50X(vfetch_wx)(cpu, addr, acc_rx);
 }
 
 static inline uint32_t E50X(vfetch_dp)(cpu_t *cpu, uint32_t addr)
 {
-  return E50X(vfetch_dx)(cpu, addr, acc_nn);
+  return E50X(vfetch_dx)(cpu, addr, acc_rx);
 }
 
 static inline void E50X(vstore_wp)(cpu_t *cpu, uint32_t addr, uint16_t val)
 {
-  E50X(vstore_wx)(cpu, addr, val, acc_nn);
+  E50X(vstore_wx)(cpu, addr, val, acc_wx);
 }
 
 static inline void E50X(vstore_dp)(cpu_t *cpu, uint32_t addr, uint32_t val)
 {
-  E50X(vstore_dx)(cpu, addr, val, acc_nn);
+  E50X(vstore_dx)(cpu, addr, val, acc_wx);
 }
 
 
+static inline void E50X(timer_start)(cpu_t *cpu)
+{
+  if(cpu->crs->km.in)
+  {
+    cpu->crs->timer -= em50_timer();
+    cpu->crs->km.in = 0;
+  }
+}
+
+static inline void E50X(timer_stop)(cpu_t *cpu)
+{
+  if(!cpu->crs->km.in)
+  {
+    cpu->crs->timer += em50_timer();
+    cpu->crs->km.in = 1;
+  }
+}
+
 static inline void E50X(timer_set)(cpu_t *cpu, uint32_t value)
 {
-  uint32_t timer = value - em50_timer();
-  timer &= ~1;
-  timer |= value >> 31;
-  cpu->crs->timer = timer;
-  uint32_t owner = cpu->crs->owner;
-  if(cpu->crs->km.pxm && owner)
-    E50X(vstore_dp)(cpu, owner + offsetin(pcb_t, itimer), value);
+PRINTK("TIMER %8.8x SET pxm %d\n", value, cpu->crs->km.pxm);
+  if(cpu->crs->km.pxm && !cpu->crs->km.in)
+  {
+    uint32_t timer = value - em50_timer();
+    timer &= ~1;
+    timer |= value >> 31;
+    cpu->crs->timer = timer;
+  }
+  else
+    cpu->crs->timer = value;
 }
 
 static inline uint32_t E50X(timer_get)(cpu_t *cpu)
 {
-  uint32_t timer = cpu->crs->timer + em50_timer();
-  timer &= ~1;
-  timer |= timer >> 31;
-  uint32_t owner = cpu->crs->owner;
-  if(cpu->crs->km.pxm && owner)
+  if(cpu->crs->km.pxm)
   {
-    uint32_t otimer = E50X(vfetch_dp)(cpu, owner + offsetin(pcb_t, itimer));
-    if((1 & (otimer ^ timer)))
-      E50X(timer_set)(cpu, timer);
-    if((otimer & 1) && !(timer & 1))
+    uint32_t timer = cpu->crs->timer + (cpu->crs->km.in ? 0 : em50_timer());
+
+    if((timer & 1) ^ (timer >> 31))
     {
-      uint16_t abrt = E50X(vfetch_wp)(cpu, owner + offsetin(pcb_t, abort));
-      abrt |= 0x0001;
-      E50X(vstore_wp)(cpu, owner + offsetin(pcb_t, abort), abrt);
+      cpu->crs->timer &= ~1;
+      cpu->crs->timer |= (timer >> 31);
+      if(!(timer >> 31))
+      {
+PRINTK("TIMER %8.8x ABRT\n", timer);
+        uint32_t owner = cpu->crs->owner;
+        uint16_t abrt = E50X(vfetch_wp)(cpu, owner + offsetin(pcb_t, abort));
+        abrt |= 0x0001;
+        E50X(vstore_wp)(cpu, owner + offsetin(pcb_t, abort), abrt);
+      }
     }
+
+    return timer;
   }
-  return timer;
+  else
+    return cpu->crs->timer;
 }
 
+#define case_rs(_off) \
+  case 0x4040+(_off): \
+  case 0x4060+(_off): \
+  case 0x4080+(_off): \
+  case 0x40a0+(_off): \
+  case 0x40c0+(_off): \
+  case 0x40e0+(_off): \
+  case 0x4100+(_off): \
+  case 0x4120+(_off)
 
 static inline void E50X(store_rs)(cpu_t *cpu, int loc, uint32_t value)
 {
   if(loc & 0x4000)
   {
   switch(loc) {
-    case 0x4058:
-    case 0x4078:
-    case 0x4098:
-    case 0x40b8:
+    case_rs(0x18):
       if(loc2crn(cpu, loc) == cpu->crn)
-      {
         E50X(timer_set)(cpu, value);
-        break;
-      }
+      else
+        cpu->srf.r[loc & 0777] = value;
+      break;
+    case_rs(0x08):
+    case_rs(0x09):
+    case_rs(0x0a):
+    case_rs(0x0b):
+      loc ^= 1;
     default:
       cpu->srf.r[loc & 0777] = value;
     }
@@ -174,19 +212,23 @@ static inline void E50X(store_rs)(cpu_t *cpu, int loc, uint32_t value)
     }
   }
 }
-  
-  
+
+
 static inline uint32_t E50X(fetch_rs)(cpu_t *cpu, int loc)
 {
   if(loc & 0x4000)
   {
     switch(loc) {
-      case 0x4058:
-      case 0x4078:
-      case 0x4098:
-      case 0x40b8:
+      case_rs(0x18):
         if(loc2crn(cpu, loc) == cpu->crn)
           return E50X(timer_get)(cpu);
+        else
+          return cpu->srf.r[loc & 0777];
+      case_rs(0x08):
+      case_rs(0x09):
+      case_rs(0x0a):
+      case_rs(0x0b):
+        loc ^= 1;
       default:
         return cpu->srf.r[loc & 0777];
     }
@@ -300,6 +342,20 @@ static inline void pxm_intrchk(cpu_t *cpu, uint32_t v)
 }
 
 
+static inline void __attribute__ ((noreturn)) pxm_check(cpu_t *cpu)
+{
+uint32_t vector = 0x00040000 | cpu->fault.vector;
+
+  E50X(vstore_dp)(cpu, vector+000, cpu->fault.pc);
+  E50X(vstore_dp)(cpu, vector+002, cpu->fault.km.d);
+  S_RB(cpu, vector+004);
+
+  set_cpu_mode(cpu, km_e64v);
+
+  longjmp(cpu->endop, endop_nointr1); // FIXME TODO CHECK
+}
+
+
 static inline void __attribute__ ((noreturn)) pxm_fault(cpu_t *cpu)
 {
   uint32_t owner  = cpu->crs->owner;
@@ -326,9 +382,9 @@ fault_name(cpu->fault.vecoff), cpu->fault.offset, cpu->fault.vector,cpu->fault.v
 static inline void E50X(pxm_save)(cpu_t *cpu)
 {
   uint32_t owner = cpu->crs->owner;
-pcb_t *pcb = physad(cpu, E50X(v2r)(cpu, owner, acc_nn));
+pcb_t *pcb = physad(cpu, E50X(v2r)(cpu, owner, acc_wx));
 
-logmsg("pxm_save crs %d pcb %8.8x, level %4.4x/%4.4x\n", cpu->crs->km.crs, owner, cpu->srf.mrf.ppa, from_be_16(pcb->level));
+PRINTK("pxm_save crs %d pcb %8.8x, level %4.4x/%4.4x\n", cpu->crs->km.crs, owner, cpu->srf.mrf.ppa, from_be_16(pcb->level));
 
   pcb->last = to_be_16(cpu->crs->km.crs << 5);
 //E50X(vstore_wp)(cpu, owner + offsetin(pcb_t, last), cpu->crs->km.crs << 5);
@@ -364,14 +420,15 @@ logmsg("pxm_save crs %d pcb %8.8x, level %4.4x/%4.4x\n", cpu->crs->km.crs, owner
 //PRINTK("keys %6.6o\n", cpu->crs->km.keys);
   pcb->keys = to_be_16(G_KEYS(cpu));
 //E50X(vstore_wp)(cpu, owner + offsetin(pcb_t, keys), cpu->crs->km.keys);
+  pcb->itimer = to_be_32(E50X(timer_get)(cpu));
   cpu->crs->km.sd = 1;
 }
 
 
 static inline void E50X(pxm_rest)(cpu_t *cpu, uint32_t pcba, uint16_t level)
 {
-logmsg("pxm_rest crs %d %4.4x\n", cpu->crs->km.crs, pcba);
-pcb_t *pcb = physad(cpu, E50X(v2r)(cpu, pcba, acc_nn));
+PRINTK("pxm_rest crs %d %4.4x\n", cpu->crs->km.crs, pcba);
+pcb_t *pcb = physad(cpu, E50X(v2r)(cpu, pcba, acc_rx));
 
   cpu->crs->owner = pcba;
   cpu->crs->dtar[3-2] = from_be_32(pcb->dtar2);
@@ -410,11 +467,14 @@ PRINTK("pxm_rest pcb %8.8x, level %4.4x smask %4.4x\n", pcba, cpu->srf.mrf.ppa, 
   mm_ptlb(cpu);
 
   cpu->crs->km.sd = 0;
+  cpu->crs->km.in = 1;
 }
 
 
-static inline void E50X(pxm_check)(cpu_t *cpu)
+static inline void E50X(pxm_abrtchk)(cpu_t *cpu)
 {
+  E50X(timer_get)(cpu);
+
   uint32_t owner = cpu->crs->owner;
 
   uint16_t abrt = E50X(vfetch_wp)(cpu, owner + offsetin(pcb_t, abort));
@@ -422,6 +482,7 @@ static inline void E50X(pxm_check)(cpu_t *cpu)
   if(abrt)
   {
     E50X(vstore_wp)(cpu, owner + offsetin(pcb_t, abort), 0);
+cpu->crs->km.fex = 0; // TODO ???
     E50X(process_fault)(cpu, abrt);
   }
 }
@@ -433,8 +494,12 @@ static inline void __attribute__ ((noreturn)) E50X(pxm_disp)(cpu_t *cpu)
   uint16_t ppa = cpu->srf.mrf.ppa;
   uint16_t seg = cpu->crs->ownerh;
 
+  E50X(timer_stop)(cpu);
+
+PRINTK("DISP1 TIMER %8.8X\n", cpu->crs->timer);
   if(!pcb)
   {
+do { ppa = cpu->srf.mrf.ppa;
     uint32_t rl = (seg << 16) | ppa;
 
     do
@@ -444,11 +509,11 @@ static inline void __attribute__ ((noreturn)) E50X(pxm_disp)(cpu_t *cpu)
       rl += 2;
     } while (!pcb);
 
-if(pcb == 1) { PRINTK("\nEND OF READY LIST\n"); sleep(1); }
+} while(pcb == 1);
 
   }
 
-PRINTK("bfore KEYS/MODALS: %6.6o %6.6o\n", cpu->crs->km.keys, cpu->crs->km.modals);
+PRINTK("bfore KEYS/MODALS: %6.6o %6.6o pxm %d\n", cpu->crs->km.keys, cpu->crs->km.modals, cpu->crs->km.pxm);
   uint32_t pcba = (seg << 16) | pcb;
 
   int nrs = E50X(vfetch_wp)(cpu, pcba + offsetin(pcb_t, last)) >> 5;
@@ -458,14 +523,14 @@ PRINTK("\npcba %8.8x last %d crs %d owner %8.8x\n", pcba, nrs, cpu->crs->km.crs,
 
   if(pcb == cpu->crs->ownerl)
   {
-PRINTK("\nreuse ppa\n");
-    mm_ptlb(cpu); // ???
+PRINTK("\nreuse ppa (owner)\n");
+//  mm_ptlb(cpu); // ???
   }
   else
   if(pcb == cpu->srf.urs[nrs].ownerl)
   {
 
-PRINTK("\nreuse ppa\n");
+PRINTK("\nreuse ppa crs\n");
 
     set_crs(cpu, nrs);
   }
@@ -500,18 +565,17 @@ PRINTK("-> b pxm crs %d -> %d owner %8.8x -> %8.8x\n", cpu->crs->km.crs, nrs, cp
   cpu->srf.mrf.ppa = ppa;
   cpu->srf.mrf.pcba = pcb;
 
+PRINTK("DISP2 TIMER %8.8X\n", cpu->crs->timer);
+
+  E50X(timer_start)(cpu);
+
   cpu->crs->km.in = 0;
   cpu->crs->km.sd = 0;
 
-  E50X(timer_get)(cpu);
-
 PRINTK("after KEYS/MODALS: %6.6o %6.6o\n", cpu->crs->km.keys, cpu->crs->km.modals);
-  E50X(pxm_check)(cpu);
+  E50X(pxm_abrtchk)(cpu);
 
   cpu->crs->km.ie = 1;
-
-PRINTK("after KEYS/MODALS: %6.6o %6.6o\n", cpu->crs->km.keys, cpu->crs->km.modals);
-
 
   set_cpu_mode(cpu, cpu->crs->km.mode);
 }
@@ -557,9 +621,6 @@ static inline void E50X(pxm_remrdy)(cpu_t *cpu)
 {
   uint32_t owner = cpu->crs->owner;
   uint16_t segno = owner >> 16;
-
-  /* Save the timer */
-  E50X(timer_get)(cpu);
 
   uint16_t lvl = cpu->srf.mrf.ppa;
   uint16_t pcb = cpu->srf.mrf.pcba;
@@ -658,6 +719,7 @@ if(!pcb) PRINTK("\nremwait error wl %8.8x\n", wl);
   return pcba;
 }
 
+
 static inline void E50X(pxm_notify)(cpu_t *cpu, uint32_t ap, int tobol)
 {
   uint32_t pcba = E50X(pxm_remwait)(cpu, ap);
@@ -666,7 +728,7 @@ static inline void E50X(pxm_notify)(cpu_t *cpu, uint32_t ap, int tobol)
 
   uint16_t levelc = cpu->srf.mrf.ppa;
 
-logmsg("level current pcb %4.4x level new pcb %4.4x\n", levelc, level);
+PRINTK("level current pcb %4.4x level new pcb %4.4x\n", levelc, level);
 
 PRINTK("ntfy level %4.4x levelc %4.4x tobol %d\n",level, levelc, tobol);
 

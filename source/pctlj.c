@@ -359,7 +359,7 @@ static inline void E50X(cparg)(cpu_t *cpu)
   uint16_t x = G_X(cpu);
   int nargs = G_Y(cpu);
 
-  int l;
+  int l = 0;
 
   while(nargs > 0)
   {
@@ -444,7 +444,6 @@ static inline void E50X(cparg)(cpu_t *cpu)
         logmsg("-> arg %8.8x %8.8x.%4.4x\n", at, a | ea_e, bit << 12);
         E50X(vstore_d)(cpu, at, a | ea_e);
         E50X(vstore_w)(cpu, intraseg_i(at, 2), bit << 12);
-        bit = 0;
       }
       else
       {

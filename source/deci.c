@@ -46,7 +46,11 @@
 #ifndef _deci_c
 #define _deci_c
 
+#if defined(__SIZEOF_INT128__)
 typedef __int128_t intdec_t;
+#else
+typedef __int64_t intdec_t;
+#endif
 
 #define dcw_dt_ls 0   /* Leading Separate */
 #define dcw_dt_ts 1   /* Trailing Separate */
