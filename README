@@ -10,7 +10,7 @@ Documentation and tape media:
 From: http://bitsavers.org
 
 
-Primos installation script install_primos requires: expect, wget and unzip
+Primos installation script install_primos requires: expect, curl and unzip
 
 
 Known issues:
@@ -21,7 +21,6 @@ Known issues:
 
 Todo:
 - MP support 
-- AMLC connect 
 - RJE support in combination with hercules http://hercules-390.org
 
 
@@ -31,6 +30,8 @@ Valid options are:
   -b --bind    <0.0.0.0>
   -l --port    <2323>
   -s --storage <size>
+  -i --pncbind <0.0.0.0>
+  -o --pncport <2324>
   -h --help
 
 
